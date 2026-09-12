@@ -21,9 +21,9 @@ def fingerprint(dataset,config,code_root=None):
         digest.update(path.name.encode());digest.update(path.read_bytes())
     return digest.hexdigest()
 
-def run(dataset,output,checkpoint,provider='offline',model='',samples=False,budget=10,input_price=0,output_price=0,usage_report=None):
+def run(dataset,output,checkpoint,provider='offline',model='',samples=False,budget=10,input_price=0,output_price=0,usage_report=None,cache_dir=None):
     repository=DatasetRepository(dataset)
-    media=ImageEvidence(dataset,ROOT/'.cache'/'ocr')
+    media=ImageEvidence(dataset,cache_dir if cache_dir is not None else ROOT/'.cache'/'ocr')
     requests=repository.tables['sample_requests' if samples else 'requests']
     config=dict(provider=provider,model=model,samples=samples,budget=budget,input_price=input_price,output_price=output_price)
     signature=fingerprint(Path(dataset),config)

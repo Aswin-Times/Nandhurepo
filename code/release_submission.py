@@ -28,6 +28,8 @@ def package_submission(root,output,usage_report,manifest,destination):
     entries.extend((root/name,name) for name in ('requirements.txt','SPEC.md','CONSTANTS.md','INTERVIEW.md','EXPERIMENTS.md') if (root/name).is_file())
     entries.append((root/'SOLUTION_README.md','README.md'))
     entries.append((usage_report,'evaluation/usage_report.md'))
+    if (root/'evaluation'/'offline_golden.sha256').is_file():
+        entries.append((root/'evaluation'/'offline_golden.sha256','evaluation/offline_golden.sha256'))
     destination=Path(destination)
     with zipfile.ZipFile(destination,'w',zipfile.ZIP_DEFLATED) as archive:
         for path,name in entries:archive.write(path,name)
