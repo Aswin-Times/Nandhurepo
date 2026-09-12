@@ -111,6 +111,27 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(len(result.failures),1)
         self.assertEqual(len(result.errors),0)
 
+    def test_malformed_routing_and_continuation_metadata_rejected(self):
+        variants=[dict(completion(),model={'not':'a model'}),dict(completion(),id=[])]
+        for field,value in [('reasoning_details','not-an-array'),('reasoning',{}),('tool_calls',{})]:
+            data=completion();data['choices'][0]['message'][field]=value;variants.append(data)
+        for data in variants:
+            with self.subTest(data=data),self.assertRaises(ProviderError):
+                self.make_model(Mock(return_value=wire_response(data))).complete('system',[],[])
+
+    def test_nonstandard_json_tool_arguments_repairable(self):
+        for args in ('{"amount":NaN}','{"amount":1,"amount":2}','[]'):
+            result=self.make_model(Mock(return_value=wire_response(completion('read',args)))).complete('system',[],[TOOL])
+            self.assertIn('argument_error',result['content'][0])
+
+    def test_invalid_json_and_long_retry_after_fail_without_secret_leak(self):
+        opener=Mock(return_value=io.BytesIO((SENTINEL+' not-json').encode()))
+        with self.assertRaises(ProviderError) as caught:self.make_model(opener).complete('system',[],[])
+        self.assertNotIn(SENTINEL,str(caught.exception))
+        sleeper=Mock();opener=Mock(side_effect=urllib.error.HTTPError('redacted',429,SENTINEL,{'Retry-After':'120'},None))
+        with self.assertRaises(ProviderError):self.make_model(opener,sleeper=sleeper).complete('system',[],[])
+        self.assertEqual(opener.call_count,1);sleeper.assert_not_called()
+
     def test_retry_timeout_rate_limit_and_permanent_error(self):
         sleeper=Mock()
         rate_limit=urllib.error.HTTPError('https://redacted',429,SENTINEL,{'Retry-After':'3'},None)

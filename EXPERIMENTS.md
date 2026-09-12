@@ -48,3 +48,11 @@ row. Integration uses the real adapter/agent/tools/batch/report code and only mo
 All token/cost values in those fixtures are synthetic, not live OpenRouter measurements.
 Environment OpenRouter key/model are absent, so no live smoke, 25-example hosted accuracy,
 paid cost measurement or accuracy optimization has occurred. Baseline remains 14/25.
+
+Follow-up boundary hardening: malformed routing/continuation metadata and nonstandard/duplicate
+JSON arguments failed new regressions before correction. The suite now has 73 tests, including
+real PNG/media handling with OCR inference mocked, an adapter-backed salary-amendment ablation,
+and a synthetic 250-request run through evaluation, independent replay, usage reporting and ZIP
+packaging. That synthetic run makes 1,000 mocked HTTP responses, not paid requests; its 250
+safe plans and fixture charges are not participant-dataset accuracy or cost evidence. Direct
+financial modules remain unchanged; the participant offline CSVs remain the comparison target.

@@ -15,6 +15,16 @@ from decimal import Decimal, InvalidOperation
 MAX_RESPONSE_TOKENS=2400
 MAX_HTTP_ATTEMPTS=3
 
+def strict_object(pairs):
+    result={}
+    for key,value in pairs:
+        if key in result:raise ValueError('Duplicate JSON field')
+        result[key]=value
+    return result
+
+def reject_constant(value):
+    raise ValueError('Nonstandard JSON numeric constant')
+
 class ProviderError(RuntimeError):
     def __init__(self,message,usage=None):
         super().__init__(message)
@@ -124,6 +134,14 @@ class OpenRouterModel:
             if 'error' in data:raise ValueError('Embedded provider error')
             choice=data['choices'][0];message=choice['message']
             if choice.get('finish_reason')=='error':raise ValueError('Failed completion')
+            if not isinstance(data.get('model',self.model),str) or not isinstance(data.get('id',''),str):
+                raise ValueError('Invalid routing metadata')
+            if message.get('reasoning_details') is not None and not isinstance(message['reasoning_details'],list):
+                raise ValueError('Invalid continuation metadata')
+            if message.get('reasoning') is not None and not isinstance(message['reasoning'],str):
+                raise ValueError('Invalid reasoning text')
+            if message.get('tool_calls') is not None and not isinstance(message['tool_calls'],list):
+                raise ValueError('Invalid tool-call list')
             blocks=[];ids=set()
             text=message.get('content')
             if text is not None:
@@ -136,7 +154,7 @@ class OpenRouterModel:
                 ids.add(ident)
                 block=dict(type='tool_use',id=ident,name=name,raw_arguments=arguments)
                 try:
-                    args=json.loads(arguments)
+                    args=json.loads(arguments,object_pairs_hook=strict_object,parse_constant=reject_constant)
                     if not isinstance(args,dict):raise ValueError('Arguments must be an object')
                     block['input']=args
                 except (ValueError,TypeError):
