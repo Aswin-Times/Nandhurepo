@@ -3,6 +3,8 @@
 Participant implementation: see [SOLUTION_README.md](./SOLUTION_README.md) for the agent,
 setup, tests, baseline evaluation and final-run commands. See [SPEC.md](./SPEC.md) for
 the executable contract and [EXPERIMENTS.md](./EXPERIMENTS.md) for measured decisions.
+Hosted inference now uses OpenRouter (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`);
+see [MIGRATION.md](./MIGRATION.md) for the dependency inventory and verification scope.
 
 Starter repository for the **HackerRank Orchestrate** 24-hour hackathon (September 2026).
 
@@ -39,13 +41,15 @@ Your solution must:
 - Generate one prediction for every request
 - Write the final predictions to `output.csv` in the repository root
 
-Run the starter Python entry point with:
+Run the key-free deterministic baseline with:
 
 ```bash
-python3 code/main.py
+python3 code/main.py --provider offline --output runs/baseline.csv --checkpoint runs/baseline.jsonl
 ```
 
-After running your solution, confirm that `output.csv` exists in the repository root and contains the required columns and one row for every request.
+The baseline is not the final AI submission. Follow SOLUTION_README.md for a controlled
+OpenRouter smoke, public-example evaluation and the separate final hosted run. After that
+final run, confirm root `output.csv` contains the required columns and one row for every request.
 
 ## Important File Locations
 

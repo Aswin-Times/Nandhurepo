@@ -45,3 +45,34 @@ and explicit prices are configured; no full paid batch is authorized by the smok
 Official contracts: [tool calling](https://openrouter.ai/docs/guides/features/tool-calling),
 [image inputs](https://openrouter.ai/docs/guides/overview/multimodal/image-understanding),
 [usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting).
+
+Historical removed transport details: `ANTHROPIC_API_KEY`, `api.anthropic.com/v1/messages`,
+`x-api-key`, `anthropic-version`, separate payload `system`, native block response `content`,
+and direct-provider retry statuses. There were no AsyncAnthropic/Anthropic SDK imports,
+hardcoded Claude model IDs or direct-provider setup dependencies elsewhere. The old normalized
+input/output token names remain internal names, now populated from OpenRouter usage rather
+than read directly from a Messages response. Historical log/report labels are not active config.
+
+## Verified scope and outstanding live gate
+
+73 tests pass (47 before migration), including 15 provider tests and 8 OpenRouter flow tests.
+The actual HTTP adapter is tested, not bypassed by a provider fake. A deliberately broken message
+builder causes the positive request contract test to fail; invalid responses also trigger safe
+agent fallback. A synthetic 250-request end-to-end fixture reaches validated ZIP packaging,
+while a participant public example reaches actual tools/checkpoint/report/replay through mocked
+HTTP. PNG handling mocks OCR inference separately. The salary-evidence ablation changes the
+financial disposition when the model's amendment tool is enabled; no live accuracy claim follows.
+
+Participant before/after: unchanged full/sample hashes, 250/250 coverage, 100/100 safe plan
+replays, 14/25 public methods, 13/25 statuses. Changed request IDs: none; changed output cells:
+zero; method/status/plan changes and regressions: zero. Runtime key/API endpoint references
+were removed; remaining named references document history or organizer coding harnesses.
+Current secret-format and commit-history scans found no key/private-key candidates. Dummy
+credential echo tests cover exception, trace, CSV, checkpoint, report and ZIP redaction/exclusion.
+
+No OPENROUTER_API_KEY or OPENROUTER_MODEL is available in this process. Consequently no live
+OpenRouter model was tested, no paid calls/tokens/cost were measured, and the public hosted
+accuracy/comparison is unavailable. This is code/contract verified, NOT live end-to-end certified
+or submission-ready. Configure credentials locally (never in chat), select a tools+vision model
+and explicit prices, then use the one-request smoke documented in SOLUTION_README.md.
+Accuracy work remains gated until live smoke and public-example comparison succeed.

@@ -22,7 +22,7 @@ inside a temporary directory. Run `evaluate_submission.py --before ...` or
 `summarize_experiment.py BEFORE.csv AFTER.csv` to measure changes. Earlier generated runs
 remain local under gitignored `runs/`; they must not be treated as current submission artifacts.
 
-Counterfactual tests: removing evidence retrieval removes its financial effect in scripted-agent
+Historical pre-OpenRouter counterfactual tests: removing evidence retrieval removes its financial effect in scripted-agent
 tests; removing pixel text prevents extraction; deliberately unsafe payments fail both the
 production verifier and independent replay. These are component tests, not a claim that hosted
 Claude is accurate. Hosted sample/full runs have not occurred because no API key is configured.

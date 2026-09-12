@@ -9,25 +9,44 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-The default offline mode is an initial engineering baseline. It runs exact-money forecasting
+The default hosted path is OpenRouter. Explicit offline mode is an initial engineering baseline. It runs exact-money forecasting
 and OCR but does not interpret message amendments; it is not our final AI-agent submission.
 Generate baseline artifacts in a separate location:
 
 ```sh
-python code/main.py --samples --output runs/samples.csv --checkpoint runs/samples.jsonl
+python code/main.py --provider offline --samples --output runs/samples.csv --checkpoint runs/samples.jsonl
 python code/evaluate_submission.py --actual runs/samples.csv
-python code/main.py --output runs/baseline.csv --checkpoint runs/baseline.jsonl
+python code/main.py --provider offline --output runs/baseline.csv --checkpoint runs/baseline.jsonl
 python code/independent_validation.py --output runs/baseline.csv --checkpoint runs/baseline.jsonl
 ```
 
-For the real agent, configure `ANTHROPIC_API_KEY` in the process environment and select
-an available model ID. Never put a key in code or chat. Supply the model's current prices
+For the real agent, configure `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` in the process
+environment. Choose an OpenRouter model supporting native function tools and image input;
+not every routed model supports both. `--model` overrides the environment model. Never put
+a key in code or chat. `.env.example` lists configuration names; `.env` files are ignored and
+are not automatically loaded. Use a trusted local environment/credential manager.
+`OPENROUTER_BASE_URL` optionally overrides the HTTPS API base (default
+`https://openrouter.ai/api/v1`); use only a trusted proxy because it receives the credential.
+No direct-provider credentials or SDK are required. Supply the model's current prices
 in USD per million tokens; the placeholders below must be replaced by numeric prices.
 
 ```sh
-python code/main.py --provider anthropic --model YOUR_MODEL_ID --budget-usd 10 --input-price INPUT_USD_PER_MILLION --output-price OUTPUT_USD_PER_MILLION --samples --output runs/agent-samples.csv --checkpoint runs/agent-samples.jsonl
+python code/main.py --provider openrouter --samples --limit 1 --budget-usd 1 --input-price INPUT_USD_PER_MILLION --output-price OUTPUT_USD_PER_MILLION --output runs/smoke.csv --checkpoint runs/smoke.jsonl
+```
+
+Inspect the smoke checkpoint's tool trace, usage, validation and fallback count before a larger
+experiment. Missing key/model produces a clear hosted configuration error; offline needs neither.
+Run the public-example comparison only after the smoke succeeds:
+
+```sh
+python code/main.py --provider openrouter --budget-usd 10 --input-price INPUT_USD_PER_MILLION --output-price OUTPUT_USD_PER_MILLION --samples --output runs/agent-samples.csv --checkpoint runs/agent-samples.jsonl
 python code/evaluate_submission.py --actual runs/agent-samples.csv --before runs/samples.csv
-python code/main.py --provider anthropic --model YOUR_MODEL_ID --budget-usd 10 --input-price INPUT_USD_PER_MILLION --output-price OUTPUT_USD_PER_MILLION --output output.csv --checkpoint runs/final.jsonl --usage-report code/evaluation/usage_report.md
+```
+
+The expensive full run is a separate step after reviewing the public-example experiment:
+
+```sh
+python code/main.py --provider openrouter --budget-usd 10 --input-price INPUT_USD_PER_MILLION --output-price OUTPUT_USD_PER_MILLION --output output.csv --checkpoint runs/final.jsonl --usage-report code/evaluation/usage_report.md
 python code/independent_validation.py --output output.csv --checkpoint runs/final.jsonl
 python code/release_submission.py --checkpoint runs/final.jsonl
 ```
@@ -38,10 +57,30 @@ a new checkpoint. API failures and exhausted agent work emit an explicit insuffi
 explanation with no payment; release requires review of these fallbacks. A torn checkpoint
 record fails loudly; preserve it and choose a new checkpoint rather than silently skipping data.
 
-`run_agent_loop` is the model-directed core. Claude chooses evidence retrieval, image reads,
+`run_agent_loop` is the model-directed core. The configured model chooses evidence retrieval, image reads,
 fact amendments, simulation, and completion. It can repeat tools and react to structured errors.
-The financial investigator keeps one user's evidence in one context. The Messages API uses
-client tool calls and returned tool results as described in the [Anthropic tool-use contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).
+The financial investigator keeps one user's evidence in one context. The internal block protocol
+is normalized by `OpenRouterModel.complete`; only the adapter constructs HTTP requests. Native
+function calls/JSON arguments and textual tool results follow the [OpenRouter tool-use contract](https://openrouter.ai/docs/guides/features/tool-calling).
+Image evidence uses a paired untrusted user message with base64 PNG `image_url` content;
+assistant reasoning details are preserved opaquely on later turns. Tools are sent on every turn,
+with required-parameter routing enabled. Final rows still come from verified `finish_decision`,
+not free-form text or unverified model-proposed payments.
+
+The adapter is standard-library HTTP, injectable for tests. It retries transient HTTP/network
+failures at most three times, uses a 60-second per-attempt timeout, honors numeric Retry-After
+up to 60 seconds, and refuses longer waits for a later resume. Malformed/embedded-error responses
+are not automatically retried because they may already be billed. Error bodies/headers are never
+logged; exceptions are sanitized and returned content redacts the configured key. Redirects are
+disabled so authorization cannot be forwarded. Tests mock HTTP, never a fake provider replacement.
+
+Tokens are actual OpenRouter prompt/completion usage normalized to input/output fields.
+Provider-reported charge is recorded separately from the configured-price estimate; missing
+usage is flagged rather than fabricated, and blocks release. Reports reconcile all checkpointed
+turns and resumed rows, including model identifiers returned by routing. Budget reservation
+includes three possible attempts; unknown charges reserve the envelope estimate. This is not
+a billing hard cap: routing/image/cache prices and unreported retry charges can differ from
+configured rates. Set an account-side key spending limit for a hard financial cap.
 
 Deterministic scaffolding loads/join records, computes Decimal cash flows, caps work, enumerates
 plans, ranks eligible safe plans, validates output and persists rows. The model resolves financial
@@ -62,11 +101,17 @@ calling the production Ledger, which checks arithmetic but cannot prove source i
 
 `code.zip` contains `evaluation/usage_report.md` at the required root path, runnable code,
 tests and documentation. Dataset inputs and the transcript are separate artifacts. Packaging
-checks manifest/output/report correspondence and rejects the offline baseline. The final
-hosted run remains pending while credentials are absent. A fresh checkout with a newly created
+checks manifest/output/report correspondence and rejects unsupported providers, incomplete
+usage and the offline baseline. The final OpenRouter run remains pending while credentials
+are absent. A pre-migration fresh checkout with a newly created
 Python environment passed the contract suite and reproduced both the 25-row sample and 250-row
 full offline output hashes with cold OCR, with dependencies installed using this README.
 
 Run `python code/offline_regression.py` to regenerate the full pinned baseline in temporary
 paths. This copies existing OCR transcriptions into the temporary cache; `--cold-ocr` additionally
 checks pixel extraction. Any hash change requires a measured cause recorded in EXPERIMENTS.md.
+
+Migration inventory, baseline and verification scope are in MIGRATION.md. The post-migration
+suite includes end-to-end synthetic ZIP packaging, provider mutation negative controls and
+model-disabled evidence ablation. Mocked token/cost fixtures are not real provider usage;
+public hosted accuracy and a live smoke remain unmeasured without environment configuration.

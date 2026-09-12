@@ -37,3 +37,21 @@ and unrelated linked investment lifecycle records.
 
 Git: use submission/buy-or-wait, commit each green increment, push without force. If
 the organizer remote rejects writing, retain local commits and require an owned remote.
+
+## OpenRouter migration contract
+
+Hosted defaults to OpenRouter using OPENROUTER_API_KEY and OPENROUTER_MODEL, with optional
+trusted HTTPS OPENROUTER_BASE_URL. Explicit offline never constructs a provider or requires
+credentials. No direct Anthropic HTTP or credential dependency is allowed in runtime source.
+Keep financial modules unchanged during transport migration. The injectable HTTP adapter
+translates the existing internal block protocol into native function-call/chat/image messages;
+the agent does not perform HTTP. Preserve multi-tool turns, reasoning continuation, one repair,
+safe fallback and all deterministic plan verification. Actual usage missing from a response
+must be marked incomplete, never inferred from text; charges and estimates stay distinct.
+
+Acceptance evidence: provider payload/response tests, malformed-data and key-redaction controls,
+an intentionally broken adapter detected by the positive contract test, actual adapter-backed
+real-tool batch/report/replay and synthetic full ZIP packaging, key-free offline execution,
+unchanged 250-row and 25-row hashes, and 100 independent participant-plan validations.
+Live smoke and public hosted accuracy require environment configuration; mocks cannot establish
+live compatibility or improved financial correctness. Only optimize accuracy after those gates.

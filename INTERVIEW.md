@@ -25,7 +25,7 @@ a determinism guarantee. Completed rows are checkpointed; partial/corrupt checkp
 are detected, not automatically repaired. Model HTTP failures with no usage response are an
 accounting boundary. Do not claim leaderboard rank, hidden-label accuracy or live-agent results.
 
-## Gate 7 manual self-score — not an organizer score
+## Historical Gate 7 manual self-score at b1b3acc — not an organizer score
 
 The requested orchestrate skill repository and CLI were unavailable in the local workspace;
 `orchestrate evaluate`, `mentor`, `release`, and `certify` were not run. This readiness assessment
@@ -42,3 +42,19 @@ Using the supplied 30/30/10/30 artifact weights, this subjective readiness estim
 It is neither a leaderboard prediction nor a claim of submission correctness. The weakest gate
 is financial interpretation/output quality. Next action: obtain locally configured model access,
 run public samples, diagnose mismatches, then run the complete hosted batch and recheck release.
+
+## OpenRouter migration readiness
+
+Direct API transport was removed, not retained as an alternate provider. OpenRouter owns all
+hosted HTTP behind an injectable adapter; the financial engine still owns the same constraints.
+Provider-normalized blocks preserve the existing agent loop without leaking wire HTTP into
+financial decisions. Tool JSON, multiple calls, image handoff and opaque reasoning continuation
+are covered by boundary tests. Invalid responses never become arbitrary CSV decisions.
+
+73 tests pass, including a deliberately broken real adapter detected by its positive contract
+test, an evidence-disabled counterfactual, real-tool batch/report/replay, and synthetic full-run
+ZIP packaging. Offline participant artifacts remain byte-identical and public methods stay
+14/25. No actual OpenRouter model/call/usage/accuracy has been measured: key/model are absent.
+Code is ready for a configured small smoke experiment, not claimed live-certified or submission
+ready. Output interpretation remains the weakest gate; provider replacement is not an accuracy
+improvement. Numeric quote validation does not prove the model's semantic reading is correct.

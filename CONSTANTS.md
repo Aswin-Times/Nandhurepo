@@ -17,9 +17,12 @@
 | Model temperature | 0 | JUDGEMENT | Reduces hosted variation; does not establish bit stability |
 | Maximum model response | 2400 tokens | BOUND | Limits each response, not entire batch |
 | HTTP attempts | 3 | BOUND | Retry transient status/network failure |
-| HTTP retry sleep | 1 then 2 seconds | JUDGEMENT | Deterministic exponential backoff |
+| HTTP retry sleep | 1 then 2 seconds, or larger numeric Retry-After | JUDGEMENT / HTTP contract | Never retry sooner than supplied seconds; >60 seconds requires later resume |
 | HTTP timeout | 60 seconds | BOUND | Avoid indefinite model call |
 | Budget framing allowance | 2000 raw token units | JUDGEMENT | Conservative reservation alongside UTF-8 payload-byte bound |
+| Budget retry factor | 3 | BOUND / JUDGEMENT | Reserve all possible attempts; not an account billing guarantee for routed/image/cache prices |
+| OpenRouter default base | https://openrouter.ai/api/v1 | STANDARD provider contract | HTTPS-only overrides; credentials, URL queries and redirects rejected |
+| Controlled smoke limit | 1 request | BOUND | Explicit --limit; sample/full experiments are separate steps |
 | Budget default | USD 10 | JUDGEMENT | Configurable; requires actual selected model prices |
 | Installment cap convention | payment count <= max months | JUDGEMENT | Monthly offers in this dataset; arbitrary nonmonthly terms need review |
 
