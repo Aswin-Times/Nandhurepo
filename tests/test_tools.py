@@ -52,4 +52,20 @@ class ToolsTests(unittest.TestCase):
         tools=FinancialTools(FakeRepository(),REQ,None)
         with self.assertRaises(ValueError):
             tools.dispatch('apply_evidence_amendments',{'amendments':[dict(evidence_id='madeup',quote='salary',operation='add')]})
+    def test_real_source_cannot_support_fabricated_amount(self):
+        tools=FinancialTools(FakeRepository(),REQ,None)
+        tools.context['messages']=[dict(message_id='m',message_text='Salary USD 100 confirmed for 2026-01-05.',
+                                       sent_at='2025-12-30T00:00:00Z',source_type='employer')]
+        with self.assertRaises(ValueError):
+            tools.dispatch('apply_evidence_amendments',{'amendments':[dict(evidence_id='m',
+                quote='Salary USD 100 confirmed for 2026-01-05.',operation='add',amount='9999',
+                date='2026-01-05',direction='credit',category='salary')]})
+    def test_unstated_date_cannot_be_invented(self):
+        tools=FinancialTools(FakeRepository(),REQ,None)
+        tools.context['messages']=[dict(message_id='m',message_text='Salary USD 100 confirmed for 2026-01-05.',
+                                       sent_at='2025-12-30T00:00:00Z',source_type='employer')]
+        with self.assertRaises(ValueError):
+            tools.dispatch('apply_evidence_amendments',{'amendments':[dict(evidence_id='m',
+                quote='Salary USD 100 confirmed for 2026-01-05.',operation='add',amount='100',
+                date='2026-01-03',direction='credit',category='salary')]})
 if __name__=='__main__': unittest.main()

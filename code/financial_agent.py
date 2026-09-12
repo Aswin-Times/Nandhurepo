@@ -34,9 +34,16 @@ def run_agent_loop(model, tools, request, fallback, max_steps=MAX_AGENT_STEPS):
                                        recovery='Correct arguments using retrieved evidence; do not guess.'))
                 if call['name']=='finish_decision':
                     finish_failures+=1
+            except Exception:
+                result=dict(error=dict(code='internal_tool_error',message='Tool failed; no financial result accepted',
+                                       recovery='Retry or finish with explicit uncertainty'))
+            image=result.pop('_model_image',None)
             trace.append(dict(step=step,tool=call['name'],arguments=call.get('input',{}),result=result))
+            tool_content=json.dumps(result,ensure_ascii=False)
+            if image:
+                tool_content=[dict(type='text',text=tool_content),image]
             results.append(dict(type='tool_result',tool_use_id=call['id'],
-                                content=json.dumps(result,ensure_ascii=False),is_error='error' in result))
+                                content=tool_content,is_error='error' in result))
             if 'row' in result:
                 finished=result['row']
         if finished is not None:

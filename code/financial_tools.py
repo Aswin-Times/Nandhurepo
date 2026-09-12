@@ -1,6 +1,7 @@
 """Evidence tools, deterministic plan search, and schema-checked dispositions."""
 import itertools
 import re
+import base64
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal as D
@@ -99,11 +100,13 @@ class FinancialTools:
             if 'suggested_amount' in result:
                 self.resolved[event['event_id']]=result['suggested_amount']
             self.state=None; self.plans_checked=False
-            return result
+            path=self.repository.dataset/'media'/'images'/(image['image_id']+'.png')
+            return {**result,'_model_image':dict(type='image',source=dict(type='base64',media_type='image/png',
+                                                  data=base64.b64encode(path.read_bytes()).decode('ascii')))}
         if name=='resolve_image_amount':
             result=self.image_results.get(args['image_id'])
-            if result is None or not args['quote'] or args['quote'] not in '\n'.join(result['lines']):
-                raise ValueError('Read linked image and cite an exact OCR quote first')
+            if result is None or not args['quote']:
+                raise ValueError('Read linked image pixels and cite the amount label first')
             amount=money(args['amount'])
             if amount<=0: raise ValueError('Missing image amount cannot be replaced with zero')
             image=next(i for i in self.context['images'] if i['image_id']==args['image_id'])
@@ -131,7 +134,22 @@ class FinancialTools:
                     if any(word in lower for word in ('pending','awaiting approval','still processing','belum disetujui','masih tertunda')):
                         raise ValueError('Pending credit cannot be made available by amendment')
                 if amendment.get('amount'):
-                    money(amendment['amount'])
+                    amount=money(amendment['amount'])
+                    if amount<=0:raise ValueError('Evidence cash amount must be positive')
+                    quoted={money(n.replace(',','')) for n in re.findall(r'(?<!\w)\d+(?:,\d+)*(?:\.\d{1,2})?(?!\w)',amendment['quote'])}
+                    derived=False
+                    if self.state is not None and amendment.get('target_event_id'):
+                        record=next((r for r in self.state.recurring if r['event_id']==amendment['target_event_id']),None)
+                        percentages=re.findall(r'(\d+(?:\.\d+)?)\s*%',amendment['quote'])
+                        if record and percentages:
+                            derived=any(money(money(record['amount'])*(1+D(p)/100))==amount for p in percentages)
+                    if amount not in quoted and not derived:
+                        raise ValueError('Amount not supported by the quoted source or explicit percentage amendment')
+                if amendment.get('date') and amendment['date'] not in amendment['quote']:
+                    raise ValueError('One-time cash flow date must be stated in quoted evidence')
+                if amendment.get('target_event_id') and self.state is not None:
+                    if amendment['target_event_id'] not in {r['event_id'] for r in self.state.recurring}|{e['event_id'] for e in self.context['events']}:
+                        raise ValueError('Unknown evidence amendment target')
             self.amendments.extend(args['amendments']);self.state=None;self.plans_checked=False
             return dict(applied=len(args['amendments']),next_step='reconstruct_finances')
         if name=='evaluate_payment_plans':
@@ -148,7 +166,7 @@ class FinancialTools:
                         changed,actions=self.changed_ledger(selected)
                         plan=choose_plan(changed,self.request,self.context['profile'],self.context['options'],actions)
                         # Optional changes cannot alter the specified baseline partial/date fields.
-                        if plan and plan['method']=='partial_payment': continue
+                        if plan and plan['method'] in {'partial_payment','wait'}: continue
                         if plan: candidates.append((plan,changed))
                     if candidates: break
                 if candidates:

@@ -43,5 +43,11 @@ class AgentTests(unittest.TestCase):
         result=run_agent_loop(ScriptedModel([('invalid',{}),('finish',{})]),tools,{},lambda why:{'fallback':why})
         self.assertEqual(result['trace'][0]['result']['error']['code'],'invalid_tool_arguments')
         self.assertIn('row',result)
+    def test_unexpected_tool_failure_preserves_usage(self):
+        class BrokenTools(FakeTools):
+            def dispatch(self,name,args):raise RuntimeError('implementation defect')
+        result=run_agent_loop(ScriptedModel([('evidence',{})]),BrokenTools(),{},lambda why:{'fallback':why},max_steps=1)
+        self.assertEqual(result['usage']['input_tokens'],10)
+        self.assertEqual(result['trace'][0]['result']['error']['code'],'internal_tool_error')
 
 if __name__=='__main__': unittest.main()
