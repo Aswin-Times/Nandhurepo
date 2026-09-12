@@ -19,7 +19,7 @@ if __name__=='__main__':
             with tempfile.TemporaryDirectory() as tmp:
                 out=Path(tmp)/'sample.csv'
                 with contextlib.redirect_stdout(io.StringIO()):
-                    run(ROOT/'dataset',out,Path(tmp)/'checkpoint.jsonl',samples=True)
+                    run(ROOT/'dataset',out,Path(tmp)/'checkpoint.jsonl',provider='offline',samples=True)
                 actual=read(out);metrics=compare_rows(expected,actual)
                 if base is None:base=actual
                 change=blast_radius(base,actual)

@@ -10,6 +10,14 @@ from release_submission import package_submission
 from release_submission import validate_manifest_freshness
 
 class ReleaseTests(unittest.TestCase):
+    def test_unknown_hosted_provider_and_incomplete_usage_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);out=root/'output.csv';out.write_text('fixture')
+            digest=hashlib.sha256(out.read_bytes()).hexdigest()
+            report=root/'usage.md';report.write_text('abc '+digest)
+            base=dict(provider='openrouter',request_count=250,usage={'model_calls':1},fingerprint='abc',output_sha256=digest)
+            for manifest in (dict(base,provider='obsolete'),dict(base,usage={'model_calls':1,'usage_missing_calls':1})):
+                with self.assertRaises(ValueError):package_submission(root,out,report,manifest,root/'code.zip')
     def test_code_changed_after_run_is_detected(self):
         from main import fingerprint
         with tempfile.TemporaryDirectory() as tmp:
@@ -34,7 +42,7 @@ class ReleaseTests(unittest.TestCase):
             (root/'.env').write_text('SECRET=never-package');(root/'log.txt').write_text('private')
             out=root/'output.csv';out.write_text('fixture');digest=hashlib.sha256(out.read_bytes()).hexdigest()
             report=root/'usage.md';report.write_text('abc '+digest)
-            manifest=dict(provider='anthropic',request_count=250,usage={'model_calls':1},fingerprint='abc',output_sha256=digest)
+            manifest=dict(provider='openrouter',request_count=250,usage={'model_calls':1},fingerprint='abc',output_sha256=digest)
             destination=root/'code.zip'
             package_submission(root,out,report,manifest,destination)
             with zipfile.ZipFile(destination) as z:

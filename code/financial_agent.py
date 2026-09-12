@@ -1,6 +1,7 @@
 """Model-directed client-tool loop with bounded work and explicit safe fallback."""
 import json
 from agent_prompts import SYSTEM_PROMPT
+from model_usage import aggregate_usage
 
 MAX_AGENT_STEPS = 12
 
@@ -12,14 +13,17 @@ def run_agent_loop(model, tools, request, fallback, max_steps=MAX_AGENT_STEPS):
     for step in range(max_steps):
         try:
             response=model.complete(SYSTEM_PROMPT,messages,tools.definitions)
-        except Exception:
+        except Exception as error:
             # Provider exceptions can contain sensitive HTTP details; never persist them.
+            failed=getattr(error,'usage',{})
+            if failed.get('http_attempts'):
+                usage=aggregate_usage([{'usage':usage},{'usage':dict(failed,model_calls=1)}])
             return dict(row=fallback('model provider unavailable; evidence insufficient'),usage=usage,trace=trace)
-        usage['model_calls']+=1
-        for key in ('input_tokens','output_tokens'):
-            usage[key]+=int(response.get('usage',{}).get(key,0))
+        current=dict(response.get('usage',{}),model_calls=1)
+        if response.get('model'):current['models']={response['model']:1}
+        usage=aggregate_usage([{'usage':usage},{'usage':current}])
         content=response.get('content',[])
-        messages.append(dict(role='assistant',content=content))
+        messages.append(dict(role='assistant',content=content,continuation=response.get('continuation',{})))
         calls=[b for b in content if b.get('type')=='tool_use']
         if not calls:
             messages.append(dict(role='user',content='Use finish_decision to emit a verified row. Text alone is not a valid result.'))
@@ -28,6 +32,7 @@ def run_agent_loop(model, tools, request, fallback, max_steps=MAX_AGENT_STEPS):
         finished=None
         for call in calls:
             try:
+                if call.get('argument_error'):raise ValueError(call['argument_error'])
                 result=tools.dispatch(call['name'],call.get('input',{}))
             except (ValueError,KeyError,TypeError) as exc:
                 result=dict(error=dict(code='invalid_tool_arguments',message=str(exc),

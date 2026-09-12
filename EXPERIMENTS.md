@@ -32,3 +32,19 @@ and regenerated all 250 offline rows with cold pixel OCR. Its SHA-256 matched th
 independent Decimal replay verified 100 recommended payment plans with zero failures. One
 handwritten-image row remained an explicit insufficient-evidence fallback. These checks establish
 reproducibility and conditional arithmetic safety, not prediction correctness.
+
+## OpenRouter migration — transport only
+
+Baseline `b1b3acc`: 47 tests, public methods/plans 14/25, statuses 13/25, earliest dates 13/25,
+actions 21/25, normalized amount error 0.13333768. After the adapter/wiring change: 67 tests;
+both sample and full offline CSV hashes unchanged. Zero request IDs, output cells, methods,
+statuses or plans changed; zero public accuracy regressions. All 250 rows reproduce and all
+100 recommended plans independently replay safely. Financial decision modules are unchanged.
+
+Negative control: deliberately replacing the actual adapter's message builder with an empty
+builder makes the positive HTTP-boundary contract test fail with an assertion; the control
+checks this failure. Invalid wire responses separately force a schema-valid insufficient-evidence
+row. Integration uses the real adapter/agent/tools/batch/report code and only mocks HTTP.
+All token/cost values in those fixtures are synthetic, not live OpenRouter measurements.
+Environment OpenRouter key/model are absent, so no live smoke, 25-example hosted accuracy,
+paid cost measurement or accuracy optimization has occurred. Baseline remains 14/25.

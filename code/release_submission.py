@@ -17,15 +17,17 @@ def package_submission(root,output,usage_report,manifest,destination):
     actual=hashlib.sha256(output.read_bytes()).hexdigest()
     if actual!=manifest.get('output_sha256'):raise ValueError('Output does not match final-run manifest')
     if manifest.get('request_count')!=250:raise ValueError('Manifest is not a full evaluation run')
-    if manifest.get('provider')=='offline' or not manifest.get('usage',{}).get('model_calls'):
+    if manifest.get('provider')!='openrouter' or not manifest.get('usage',{}).get('model_calls'):
         raise ValueError('Offline baseline cannot be certified as hosted-agent submission')
+    if manifest.get('usage',{}).get('usage_missing_calls'):
+        raise ValueError('Incomplete measured model usage requires reconciliation before release')
     if manifest.get('fallback_rows',0):raise ValueError('Unresolved fallback rows require review before release')
     text=usage_report.read_text(encoding='utf-8')
     if actual not in text or manifest.get('fingerprint','missing') not in text:
         raise ValueError('Usage report does not correspond to output/configuration')
     entries=[(p,'code/'+p.name) for p in sorted((root/'code').glob('*.py'))]
     entries.extend((p,'tests/'+p.name) for p in sorted((root/'tests').glob('*.py')))
-    entries.extend((root/name,name) for name in ('requirements.txt','SPEC.md','CONSTANTS.md','INTERVIEW.md','EXPERIMENTS.md') if (root/name).is_file())
+    entries.extend((root/name,name) for name in ('requirements.txt','SPEC.md','CONSTANTS.md','INTERVIEW.md','EXPERIMENTS.md','MIGRATION.md') if (root/name).is_file())
     entries.append((root/'SOLUTION_README.md','README.md'))
     entries.append((usage_report,'evaluation/usage_report.md'))
     if (root/'evaluation'/'offline_golden.sha256').is_file():
