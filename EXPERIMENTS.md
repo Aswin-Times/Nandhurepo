@@ -56,3 +56,36 @@ and a synthetic 250-request run through evaluation, independent replay, usage re
 packaging. That synthetic run makes 1,000 mocked HTTP responses, not paid requests; its 250
 safe plans and fixture charges are not participant-dataset accuracy or cost evidence. Direct
 financial modules remain unchanged; the participant offline CSVs remain the comparison target.
+
+## First live verification pre-flight — blocked before network
+
+At 1161e5e, all 73 existing tests passed. Boolean-only checks of process, Windows user and
+machine environments found neither OPENROUTER_API_KEY nor OPENROUTER_MODEL configured.
+No credential value was printed. Model comes from OPENROUTER_MODEL or --model; pricing
+comes separately from --input-price/--output-price, with no key embedded in price configuration.
+The selected smoke candidate is simple public request_01, but it has NOT been executed live.
+Actual live OpenRouter calls: zero; live model, tokens, charges and accuracy are unmeasured.
+The 25-example hosted experiment and prompt/model tuning remain gated; no fake comparison
+or final hosted-usage report is created to fill the missing measurement.
+
+Added checks exercise seven adversarial scenarios through the real adapter/agent/tools with
+HTTP mocked: below-minimum payment, ignored pending debit, unavailable option, invented
+income, after-deadline payment, unaccepted method and malformed installment terms. None can
+authorize an unsafe payment. A positive control still pays a valid 350, not the model's attempted
+700. Unsupported proposed row fields are never authoritative; source-free income amendments
+are rejected and invalid offers are excluded. These are finite component checks, not a proof
+of all possible semantic attacks. A one-method evaluator mutation loses exactly one method
+match and changes exactly one output cell. Test-draft failures were fixture/type mistakes,
+not production financial defects; they were corrected without changing the financial engine.
+
+Decision: KEEP OPENROUTER provisionally as the tested transport. No live comparative evidence
+supports model tuning, rejection or an accuracy-improvement claim. Configure key/model locally
+and supply current prices before the one-request live gate can proceed.
+
+Final local regression: 75 tests pass and all 14 test files pass independently. Running the
+whole suite with unmocked HTTP forbidden reports zero unmocked HTTP attempts. The credential-
+free full run reproduces all 250 rows and the pinned hash; 100 forecast-plan replays pass.
+Public methods/statuses remain 14/25 and 13/25; sample hash unchanged, zero invalid rows,
+changed request IDs or changed cells. Current artifact freshness passes, and release correctly
+refuses this offline artifact. Secret-format scan found no credential/private-key candidates;
+transcript stays ignored. No production code, constants, prices or golden hashes were changed.
