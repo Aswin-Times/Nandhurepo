@@ -78,4 +78,20 @@ class ReconstructionTests(unittest.TestCase):
         state=reconstruct('2026-01-01',PROFILE,rows,[],{})
         self.assertFalse(any(f.amount>0 for f in state.ledger.flows))
 
+    def test_amendment_preserves_unaffected_pay_cycles(self):
+        rows=[event('pay'+str(i),day,'100','credit','settled','salary') for i,day in enumerate(
+            ['2025-10-15','2025-11-15','2025-12-15'])]
+        amendment=dict(evidence_id='employer',operation='replace_recurring',target_event_id='pay2',
+                       amount='200',day=15,effective_date='2026-02-15')
+        state=reconstruct('2026-01-01',PROFILE,rows,[],{},amendments=[amendment])
+        self.assertEqual([(f.day,f.amount) for f in state.ledger.flows],
+                         [('2026-01-15',D('100')),('2026-02-15',D('200')),('2026-03-15',D('200'))])
+
+    def test_context_order_and_id_shape_do_not_change_cash(self):
+        rows=[event('opaque/'+str(i),day,'100') for i,day in enumerate(
+            ['2025-10-02','2025-11-02','2025-12-02'])]
+        a=reconstruct('2026-01-01',PROFILE,rows,[],{})
+        b=reconstruct('2026-01-01',PROFILE,list(reversed(rows)),[],{})
+        self.assertEqual(a.ledger.capacity('2026-01-01'),b.ledger.capacity('2026-01-01'))
+
 if __name__ == '__main__': unittest.main()

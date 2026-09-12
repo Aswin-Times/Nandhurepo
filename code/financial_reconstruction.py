@@ -182,15 +182,19 @@ def reconstruct(start, profile, events, messages, rates, resolved_amounts=None, 
         if op == 'remove':
             flows = [f for f in flows if f.evidence_id != target and f.recurring_id != target]
         elif op == 'replace_recurring':
-            flows = [f for f in flows if f.recurring_id != target]
+            effective=amendment.get('effective_date',start)
+            flows = [f for f in flows if not (f.recurring_id == target and f.day >= effective)]
             record = next((r for r in recurring if r['event_id'] == target), None)
             if record is None:
                 raise ValueError('Unknown recurring amendment target')
             for d in monthly_dates(today, end, int(amendment['day'])):
-                if d.isoformat() >= amendment.get('effective_date',start):
+                if d.isoformat() >= effective:
                     amount = money(amendment['amount'])
                     flows.append(CashFlow(d.isoformat(), amount if record['direction']=='credit' else -amount,
                                           source,record['category'],target))
+            record['amount']=str(money(amendment['amount']))
+            record['day']=int(amendment['day'])
+            record['supporting_event_ids'].append(source)
         elif op == 'add':
             amount = money(amendment['amount'])
             if amendment['direction']=='debit': amount = -amount
