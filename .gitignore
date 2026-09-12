@@ -1,0 +1,10 @@
+log.txt
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+.cache/
+runs/
+code.zip
