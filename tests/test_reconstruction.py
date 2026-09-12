@@ -60,4 +60,22 @@ class ReconstructionTests(unittest.TestCase):
                 key=(rate['rate_date'],rate['from_currency'],rate['to_currency'])
                 self.assertEqual(repository.rates[key],D(rate['rate']))
 
+    def test_next_confirmed_salary_supersedes_inferred_payroll(self):
+        rows=[event('pay'+str(i),day,'100','credit','settled','salary') for i,day in enumerate(
+            ['2025-10-15','2025-11-15','2025-12-15'])]
+        rows.append(event('confirmed','2026-01-15','200','credit','scheduled','salary'))
+        rows[-1]['description']='Next confirmed salary'
+        state=reconstruct('2026-01-01',PROFILE,rows,[],{})
+        credits=[f for f in state.ledger.flows if f.amount>0]
+        self.assertEqual(len(credits),3)
+        self.assertEqual(sum(f.amount for f in credits),D('600'))
+
+    def test_final_payroll_ends_historic_salary(self):
+        rows=[event('pay'+str(i),day,'100','credit','settled','salary') for i,day in enumerate(
+            ['2025-09-15','2025-10-15','2025-11-15'])]
+        rows.append(event('final','2025-12-15','100','credit','settled','salary'))
+        rows[-1]['description']='Final employer payroll'
+        state=reconstruct('2026-01-01',PROFILE,rows,[],{})
+        self.assertFalse(any(f.amount>0 for f in state.ledger.flows))
+
 if __name__ == '__main__': unittest.main()

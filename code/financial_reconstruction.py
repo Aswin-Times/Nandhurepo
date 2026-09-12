@@ -146,6 +146,34 @@ def reconstruct(start, profile, events, messages, rates, resolved_amounts=None, 
                 flows.append(CashFlow(d.isoformat(), e['_amount'] if e['direction'] == 'credit' else -e['_amount'],
                                       e['event_id'], e['category']))
 
+    # Explicit next payroll is the authoritative regular-income amount and calendar.
+    # It replaces inferred salary; it is not an additional independent employment stream.
+    confirmed=[e for e in rows if e['category']=='salary' and e['direction']=='credit'
+               and e['status']=='scheduled' and 'confirmed salary' in e['description'].lower()]
+    final=[e for e in rows if e['category']=='salary' and e['direction']=='credit'
+           and any(term in e['description'].lower() for term in ('final employer payroll','final payroll','final salary'))]
+    if confirmed:
+        authoritative=max(confirmed,key=lambda e:(e['event_date'],e['event_id']))
+        payday=date.fromisoformat(authoritative['settlement_date'])
+        flows=[f for f in flows if not (f.category=='salary' and f.amount>0)]
+        salary_records=[r for r in recurring if r['direction']=='credit' and r['category']=='salary']
+        recurring=[r for r in recurring if r not in salary_records]
+        recurring.append(dict(event_id=authoritative['event_id'],description=authoritative['description'],category='salary',
+                              direction='credit',amount=str(authoritative['_amount']),day=payday.day,interval='monthly',
+                              flexibility='fixed',minimum_allowed_amount='',
+                              supporting_event_ids=[authoritative['event_id']]+[r['event_id'] for r in salary_records]))
+        for d in monthly_dates(payday,end,payday.day):
+            flows.append(CashFlow(d.isoformat(),authoritative['_amount'],authoritative['event_id'],
+                                  'salary',authoritative['event_id']))
+        assumptions.append(dict(category='salary',rule='explicit confirmed next regular salary supersedes inferred payroll',
+                                evidence_ids=[authoritative['event_id']]))
+    elif final:
+        final_day=max(e['settlement_date'] for e in final)
+        flows=[f for f in flows if not (f.category=='salary' and f.amount>0 and f.day>final_day)]
+        recurring=[r for r in recurring if not (r['direction']=='credit' and r['category']=='salary')]
+        assumptions.append(dict(category='salary',rule='final employer payroll; no subsequent regular income confirmed',
+                                evidence_ids=[e['event_id'] for e in final]))
+
     # Typed, evidence-anchored amendments produced by an evidence tool/model.
     for amendment in amendments:
         source = amendment['evidence_id']
