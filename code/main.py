@@ -33,9 +33,15 @@ def run(dataset,output,checkpoint,provider='offline',model='',samples=False,budg
         if any(r['fingerprint']!=signature for r in prior):raise ValueError('Use a new checkpoint for changed inputs/configuration')
     used=sum((r['usage'].get('input_tokens',0)*input_price+r['usage'].get('output_tokens',0)*output_price)/1000000 for r in prior)
     hosted=BudgetedModel(AnthropicModel(model),budget,input_price,output_price,used) if provider=='anthropic' else None
+    def add_proof(result,tools):
+        if tools.state is not None and tools.plan_ledger is not None:
+            def flows(ledger):return [dict(date=f.day,amount=str(f.amount),evidence_id=f.evidence_id) for f in ledger.flows]
+            result['proof']=dict(opening=str(tools.state.ledger.opening),minimum=str(tools.state.ledger.minimum),
+                                 baseline_flows=flows(tools.state.ledger),plan_flows=flows(tools.plan_ledger))
+        return result
     def solve(request):
         tools=FinancialTools(repository,request,media)
-        if hosted:return run_agent_loop(hosted,tools,request,tools.fallback)
+        if hosted:return add_proof(run_agent_loop(hosted,tools,request,tools.fallback),tools)
         tools.dispatch('retrieve_evidence',{})
         for image in tools.context['images']:tools.dispatch('inspect_image',{'image_id':image['image_id']})
         tools.dispatch('reconstruct_finances',{})
@@ -43,7 +49,7 @@ def run(dataset,output,checkpoint,provider='offline',model='',samples=False,budg
         result=tools.dispatch('finish_decision',{})
         if tools.context['messages']:
             result['row']['decision_explanation']+=' Offline baseline: message amendments are not interpreted.'
-        return dict(row=result['row'],usage=dict(model_calls=0,input_tokens=0,output_tokens=0),trace=[])
+        return add_proof(dict(row=result['row'],usage=dict(model_calls=0,input_tokens=0,output_tokens=0),trace=[]),tools)
     records=execute_batch(requests,solve,lambda r,why:FinancialTools(repository,r,media).fallback(why),
                           output,checkpoint,signature)
     usage={key:sum(r['usage'].get(key,0) for r in records) for key in ('model_calls','input_tokens','output_tokens')}
