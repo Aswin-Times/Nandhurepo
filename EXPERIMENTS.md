@@ -89,3 +89,74 @@ Public methods/statuses remain 14/25 and 13/25; sample hash unchanged, zero inva
 changed request IDs or changed cells. Current artifact freshness passes, and release correctly
 refuses this offline artifact. Secret-format scan found no credential/private-key candidates;
 transcript stays ignored. No production code, constants, prices or golden hashes were changed.
+
+## OR-LIVE-01 — first real OpenRouter measurement (2026-09-12)
+
+Starting commit: 6cfa322. Financial logic and prompt unchanged. Local ignored .env settings
+were exported into the experiment process; the runtime provider reads its key only from
+environment variables. Provider: OpenRouter. Configured and returned model:
+`nvidia/nemotron-3-ultra-550b-a55b`. Temperature 0, maximum response tokens 2400,
+12-step tool loop. Current public model catalog supplied USD/million prices 0.625 input,
+3.125 output (https://openrouter.ai/api/v1/models); configured-price costs are ESTIMATED.
+The catalog advertises text-only input and tool/reasoning support, not image input.
+
+First inference call succeeded: retrieve_evidence, 1686 input/109 output tokens,
+USD 0.0010828 provider-reported cost, 3.969 seconds, reasoning/reasoning_details returned.
+The complete request_01 smoke reused that exact response rather than billing it again:
+four real calls, 49344 input + 1502 output = 50846 tokens, USD 0.018146 reported charge,
+USD 0.03553375 ESTIMATED cost, 26.157 seconds summed API time. Tool sequence:
+retrieve_evidence, reconstruct_finances, evaluate_payment_plans, finish_decision.
+Structured full_payment/affordable_now row accepted; independent minimum 21912.32
+exceeds required 18000. No smoke fallback and no missing usage.
+
+Before public evaluation: 75 tests and all 14 test files passed; offline 250-row golden
+hash unchanged, 100 independent forecast-plan replays passed, offline release refused.
+Network-denied suite counted zero unmocked HTTP attempts. Model-disabled ablation uses
+the actual offline pipeline with the hosted constructor patched to fail if invoked:
+zero constructor attempts, zero model calls, unchanged public baseline hash and 14/25
+methods, 13/25 statuses. It is a verified bypass, not merely an ineffective toggle.
+
+Unchanged public run attempted all 25 rows with USD 5 conservative local budget:
+37 real HTTP attempts, 14 returned measured responses, one HTTP 404 following
+inspect_image on request_03 and 22 HTTP 402 failures starting during request_04.
+The 404 is consistent with the text-only model's unsupported image input; its raw
+provider body was deliberately not retained, so that cause is an inference. OpenRouter
+documents 402 as insufficient account/key credits. A read-only key diagnostic returned
+is_free_tier=true and no configured key credit limit; it does not prove account balance.
+No further hosted inference, model switch, funding action or 250-row paid run occurred.
+
+Observed artifact score: methods 7/25 (delta -7), statuses 7/25 (delta -6), plans/dates
+7/25, actions 22/25, normalized amount error 0.49317553, zero schema-invalid rows.
+All 25 rows are no-payment fallbacks: two model-supplied uncertainty arguments and 23
+provider failures. The seven label matches are therefore not successful model decisions.
+This is a degraded end-to-end result, NOT a completed model-quality accuracy baseline.
+Decision fields changed on 17 requests; 25 rows/76 raw cells changed including explanations.
+Regressions versus previously correct method/status fields: requests 01,03,04,16,18,21,22.
+Detailed all-row comparison and mechanisms: evaluation/live_public_20260912.md.
+
+Public measured usage: 160436 input + 4166 output = 164602 tokens (6584.08/request).
+Reported charge USD 0.0631688 covers only 14/37 attempts; token usage missing on 23.
+USD 0.11329125 total / 0.00453165 per request is the configured-price ESTIMATE for
+measured tokens, not a complete billing reconciliation. Summed API time 94.921 seconds.
+Combined smoke/public reported charges: USD 0.0813148, with the same missing-call caveat.
+Ignored checkpoints, latency records, comparison JSON and usage reports preserve evidence;
+the required final full-dataset hosted usage report remains pending, not overwritten.
+
+Causality is proven locally for specific mechanisms, not all 25 model decisions.
+request_01's model explanation recommended the verified full payment but supplied
+uncertainty="None - confirmed salary ..."; any nonempty uncertainty causes fallback.
+request_02 correctly applied quoted message_01 salary increase (42750000 effective
+2025-08-15), producing a safe installment candidate, then ordinary forecast caveats in
+uncertainty forced fallback. No-network replay changing ONLY omission of that finish
+argument changes request_01 to full_payment and request_02 to installments, both with
+independent safe replays. This diagnostic is NOT a tuned hosted score or justification
+to ignore genuine missing evidence. Model amendments change reconstruction/candidates;
+the deterministic validator still selects and validates payment plans, never model rows.
+
+Decision: TUNE OPENROUTER. Measured finish-argument ambiguity and image compatibility
+justify a controlled integration/prompt experiment once billing is restored. Do not tune
+financial ranking or claim accuracy gains from this failed public run. First obtain funded
+access and an explicitly selected image-capable OpenRouter model; then change one variable
+at a time with fresh checkpoints. A valid complete 25-row measurement is still required.
+Production logic, constants, prompts and golden hashes remain unchanged; no submission-ready
+claim or final release certification is warranted.
