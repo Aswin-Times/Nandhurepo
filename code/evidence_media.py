@@ -5,22 +5,27 @@ import re
 from pathlib import Path
 from financial_ledger import money, amount_text
 
-NUMBER = re.compile(r'(?<![\w/])(?:\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)(?![\w/])')
+NUMBER = re.compile(r'(?<![\w/])\d+(?:,\d+)*(?:\.\d{1,2})?(?![\w/])')
 
 def extract_amount(lines, category=''):
     ranked = []
     for i, line in enumerate(lines):
-        lower = line.lower()
+        lower = re.sub(r'\s+', '', line.lower()).replace('amoumt','amount').replace('amoant','amount')
         score = 0
-        if category == 'salary' and any(label in lower for label in ('net pay','net salary','take home','gaji bersih')):
+        if any(label in lower for label in ('netpay','netsalary','takehome','gajibersih')):
             score = 100
-        elif any(label in lower for label in ('grand total','amount due','balance due','total payable','total amount','total paid','net amount')):
+        elif 'balancedue' in lower or lower.startswith('balance:') or 'amountpayable' in lower:
+            score = 95
+        elif any(label in lower for label in ('grandtotal','amountdue','totalpayable','totalamount','totalpaid','netamount')):
             score = 90
-        elif 'total' in lower and not any(label in lower for label in ('subtotal','sub total','earnings','deduction','tax')):
+        elif 'total' in lower and not any(label in lower for label in ('subtotal','earnings','deduction','tax','words')):
             score = 70
         elif 'amount' in lower or 'paid' in lower:
             score = 50
         if not score:
+            continue
+        # A different labeled column is not the value of this label.
+        if 'amountdue' in lower and 'tax' in lower:
             continue
         matches = NUMBER.findall(line)
         if not matches and i+1 < len(lines):
@@ -92,5 +97,5 @@ if __name__ == '__main__':
     media=ImageEvidence(args.dataset,'.cache/ocr')
     with (Path(args.dataset)/'images.csv').open(encoding='utf-8-sig',newline='') as f:
         for row in csv.DictReader(f):
-            result=media.read(row['image_id'],'salary' if row['image_id']=='' else '')
+            result=media.read(row['image_id'])
             print(json.dumps(result,ensure_ascii=True))
