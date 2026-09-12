@@ -7,8 +7,19 @@ import zipfile
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'code'))
 from release_submission import package_submission
+from release_submission import validate_manifest_freshness
 
 class ReleaseTests(unittest.TestCase):
+    def test_code_changed_after_run_is_detected(self):
+        from main import fingerprint
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'dataset').mkdir();(root/'code').mkdir()
+            source=root/'code'/'main.py';source.write_text('version=1')
+            config={'provider':'offline'}
+            manifest=dict(config=config,fingerprint=fingerprint(root/'dataset',config,root/'code'))
+            validate_manifest_freshness(root,manifest)
+            source.write_text('version=2')
+            with self.assertRaises(ValueError):validate_manifest_freshness(root,manifest)
     def test_stale_or_offline_artifact_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);out=root/'output.csv';out.write_text('fixture')

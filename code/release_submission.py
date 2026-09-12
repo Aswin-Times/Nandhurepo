@@ -6,6 +6,12 @@ import zipfile
 from pathlib import Path
 from independent_validation import validate_artifacts
 
+def validate_manifest_freshness(root,manifest):
+    from main import fingerprint
+    root=Path(root)
+    if 'config' not in manifest or fingerprint(root/'dataset',manifest['config'],root/'code')!=manifest['fingerprint']:
+        raise ValueError('Final-run artifact is stale for current dataset/code/configuration')
+
 def package_submission(root,output,usage_report,manifest,destination):
     root=Path(root);output=Path(output);usage_report=Path(usage_report)
     actual=hashlib.sha256(output.read_bytes()).hexdigest()
@@ -38,4 +44,5 @@ if __name__=='__main__':
     validation=validate_artifacts(root/'dataset',args.output,args.checkpoint)
     if validation['failures']:raise SystemExit(json.dumps(validation,indent=2))
     manifest=json.loads(Path(str(args.output)+'.manifest.json').read_text(encoding='utf-8'))
+    validate_manifest_freshness(root,manifest)
     print(json.dumps(package_submission(root,args.output,args.usage_report,manifest,args.zip),indent=2))

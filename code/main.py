@@ -13,11 +13,11 @@ from model_usage import BudgetedModel,write_usage_report
 
 ROOT=Path(__file__).resolve().parents[1]
 
-def fingerprint(dataset,config):
+def fingerprint(dataset,config,code_root=None):
     digest=hashlib.sha256(json.dumps(config,sort_keys=True).encode())
     for path in sorted(Path(dataset).rglob('*')):
         if path.is_file():digest.update(path.relative_to(dataset).as_posix().encode());digest.update(path.read_bytes())
-    for path in sorted((ROOT/'code').glob('*.py')):
+    for path in sorted((Path(code_root) if code_root else ROOT/'code').glob('*.py')):
         digest.update(path.name.encode());digest.update(path.read_bytes())
     return digest.hexdigest()
 
@@ -54,6 +54,7 @@ def run(dataset,output,checkpoint,provider='offline',model='',samples=False,budg
                           output,checkpoint,signature)
     usage={key:sum(r['usage'].get(key,0) for r in records) for key in ('model_calls','input_tokens','output_tokens')}
     report=dict(provider=provider,model=model or 'none',request_count=len(records),fingerprint=signature,
+                config=config,
                 output_sha256=hashlib.sha256(Path(output).read_bytes()).hexdigest(),usage=usage,
                 fallback_rows=sum('insufficient evidence' in r['row']['decision_explanation'].lower() for r in records))
     Path(str(output)+'.manifest.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
