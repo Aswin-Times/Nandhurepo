@@ -9,6 +9,7 @@ from evidence_media import ImageEvidence
 from financial_agent import run_agent_loop
 from financial_tools import FinancialTools
 from model_provider import AnthropicModel
+from model_usage import BudgetedModel,write_usage_report
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -20,13 +21,18 @@ def fingerprint(dataset,config):
         digest.update(path.name.encode());digest.update(path.read_bytes())
     return digest.hexdigest()
 
-def run(dataset,output,checkpoint,provider='offline',model='',samples=False):
+def run(dataset,output,checkpoint,provider='offline',model='',samples=False,budget=10,input_price=0,output_price=0,usage_report=None):
     repository=DatasetRepository(dataset)
     media=ImageEvidence(dataset,ROOT/'.cache'/'ocr')
-    hosted=AnthropicModel(model) if provider=='anthropic' else None
     requests=repository.tables['sample_requests' if samples else 'requests']
-    config=dict(provider=provider,model=model,samples=samples)
+    config=dict(provider=provider,model=model,samples=samples,budget=budget,input_price=input_price,output_price=output_price)
     signature=fingerprint(Path(dataset),config)
+    prior=[]
+    if Path(checkpoint).is_file():
+        prior=[json.loads(line) for line in Path(checkpoint).read_text(encoding='utf-8').splitlines()]
+        if any(r['fingerprint']!=signature for r in prior):raise ValueError('Use a new checkpoint for changed inputs/configuration')
+    used=sum((r['usage'].get('input_tokens',0)*input_price+r['usage'].get('output_tokens',0)*output_price)/1000000 for r in prior)
+    hosted=BudgetedModel(AnthropicModel(model),budget,input_price,output_price,used) if provider=='anthropic' else None
     def solve(request):
         tools=FinancialTools(repository,request,media)
         if hosted:return run_agent_loop(hosted,tools,request,tools.fallback)
@@ -45,6 +51,9 @@ def run(dataset,output,checkpoint,provider='offline',model='',samples=False):
                 output_sha256=hashlib.sha256(Path(output).read_bytes()).hexdigest(),usage=usage,
                 fallback_rows=sum('insufficient evidence' in r['row']['decision_explanation'].lower() for r in records))
     Path(str(output)+'.manifest.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+    if usage_report:
+        report['usage_report']=write_usage_report(usage_report,records,provider,model,input_price,output_price,
+                                                 signature,report['output_sha256'])
     print(json.dumps(report,indent=2))
     return report
 
@@ -56,6 +65,14 @@ if __name__=='__main__':
     parser.add_argument('--provider',choices=['offline','anthropic'],default='offline')
     parser.add_argument('--model',default='')
     parser.add_argument('--samples',action='store_true')
+    parser.add_argument('--budget-usd',type=float,default=10)
+    parser.add_argument('--input-price',type=float,default=None,help='USD per million input tokens; required for hosted run')
+    parser.add_argument('--output-price',type=float,default=None,help='USD per million output tokens; required for hosted run')
+    parser.add_argument('--usage-report',type=Path)
     args=parser.parse_args()
     if args.provider=='anthropic' and not args.model:parser.error('--model is required for hosted inference')
-    run(args.dataset,args.output,args.checkpoint,args.provider,args.model,args.samples)
+    if args.provider=='anthropic' and (args.input_price is None or args.output_price is None):
+        parser.error('--input-price and --output-price are required for hosted cost accounting')
+    report=args.usage_report or (args.output.parent/('sample_usage_report.md' if args.samples else 'usage_report.md'))
+    run(args.dataset,args.output,args.checkpoint,args.provider,args.model,args.samples,args.budget_usd,
+        args.input_price or 0,args.output_price or 0,report)
