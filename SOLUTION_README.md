@@ -64,8 +64,8 @@ calling the production Ledger, which checks arithmetic but cannot prove source i
 tests and documentation. Dataset inputs and the transcript are separate artifacts. Packaging
 checks manifest/output/report correspondence and rejects the offline baseline. The final
 hosted run remains pending while credentials are absent. A fresh checkout with a newly created
-Python environment passed the contract suite and reproduced the 25-row offline sample output
-hash, with dependencies installed using this README.
+Python environment passed the contract suite and reproduced both the 25-row sample and 250-row
+full offline output hashes with cold OCR, with dependencies installed using this README.
 
 Run `python code/offline_regression.py` to regenerate the full pinned baseline in temporary
 paths. This copies existing OCR transcriptions into the temporary cache; `--cold-ocr` additionally

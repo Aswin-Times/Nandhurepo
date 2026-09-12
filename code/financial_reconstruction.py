@@ -39,6 +39,15 @@ def reconstruct(start, profile, events, messages, rates, resolved_amounts=None, 
     rows, excluded = [], []
     seen = set()
     by_id = {e['event_id']: e for e in events}
+    def settlement_amount(e, day):
+        amount=e['_native_amount']
+        if e['currency'] != profile['home_currency']:
+            pair=(day,e['currency'],profile['home_currency'])
+            if pair not in rates:
+                raise ValueError('Missing settlement-date FX rate for ' + e['event_id'] + ' on ' + day)
+            amount=money(amount*rates[pair])
+        return amount
+
     for original in sorted(events, key=lambda e: (e['settlement_date'], e['event_id'])):
         e = dict(original)
         status = e['status']
@@ -60,6 +69,7 @@ def reconstruct(start, profile, events, messages, rates, resolved_amounts=None, 
         amount = money(raw)
         if amount < 0:
             raise ValueError('Negative amount in ' + e['event_id'])
+        e['_native_amount']=amount
         if e['currency'] != profile['home_currency']:
             pair = (e['settlement_date'], e['currency'], profile['home_currency'])
             if pair not in rates:
@@ -75,10 +85,10 @@ def reconstruct(start, profile, events, messages, rates, resolved_amounts=None, 
     groups = collections.defaultdict(list)
     for e in rows:
         if date.fromisoformat(e['settlement_date']) < today and e['status'] == 'settled':
-            groups[(e['description'],e['direction'],e['category'])].append(e)
+            groups[(e['description'],e['direction'],e['category'],e['currency'])].append(e)
     flows, recurring, used = [], [], set()
     assumptions = []
-    for (description, direction, category), history in sorted(groups.items()):
+    for (description, direction, category, currency), history in sorted(groups.items()):
         dates = [date.fromisoformat(e['settlement_date']) for e in history]
         months = {(d.year,d.month) for d in dates}
         gaps = [(b-a).days for a,b in zip(dates,dates[1:])]
@@ -92,13 +102,16 @@ def reconstruct(start, profile, events, messages, rates, resolved_amounts=None, 
         if direction == 'credit' and (category != 'salary' or any(term in description.lower() for term in
                        ('bonus','commission','arrears','prize','refund','one-time','gig','invoice','seasonal'))):
             continue
-        amount = recent[-1]['_amount'] if direction == 'credit' else max(e['_amount'] for e in recent)
         anchor = recent[-1]
+        nominal=anchor['_native_amount'] if direction=='credit' else max(e['_native_amount'] for e in recent)
+        forecast_source=dict(anchor,_native_amount=nominal)
+        amount=settlement_amount(forecast_source,anchor['settlement_date'])
         day = dates[-1].day
         record = dict(event_id=anchor['event_id'], description=description, category=category,
                       direction=direction, amount=str(amount), day=day, interval='monthly',
                       flexibility=anchor['flexibility'], minimum_allowed_amount=anchor['minimum_allowed_amount'],
-                      supporting_event_ids=[e['event_id'] for e in history])
+                      supporting_event_ids=[e['event_id'] for e in history],
+                      native_amount=str(nominal),currency=currency)
         recurring.append(record)
         used.update(e['event_id'] for e in history)
         for d in monthly_dates(today, end, day):
@@ -107,7 +120,8 @@ def reconstruct(start, profile, events, messages, rates, resolved_amounts=None, 
                         and e['settlement_date'] == d.isoformat()]
             if supplied:
                 continue
-            flows.append(CashFlow(d.isoformat(), amount if direction == 'credit' else -amount,
+            projected=settlement_amount(forecast_source,d.isoformat())
+            flows.append(CashFlow(d.isoformat(), projected if direction == 'credit' else -projected,
                                   anchor['event_id'], category, anchor['event_id']))
 
     # Aggregate irregular essentials by category, not merchant: changing merchant is not cancellation.
@@ -161,9 +175,10 @@ def reconstruct(start, profile, events, messages, rates, resolved_amounts=None, 
         recurring.append(dict(event_id=authoritative['event_id'],description=authoritative['description'],category='salary',
                               direction='credit',amount=str(authoritative['_amount']),day=payday.day,interval='monthly',
                               flexibility='fixed',minimum_allowed_amount='',
-                              supporting_event_ids=[authoritative['event_id']]+[r['event_id'] for r in salary_records]))
+                              supporting_event_ids=[authoritative['event_id']]+[r['event_id'] for r in salary_records],
+                              native_amount=str(authoritative['_native_amount']),currency=authoritative['currency']))
         for d in monthly_dates(payday,end,payday.day):
-            flows.append(CashFlow(d.isoformat(),authoritative['_amount'],authoritative['event_id'],
+            flows.append(CashFlow(d.isoformat(),settlement_amount(authoritative,d.isoformat()),authoritative['event_id'],
                                   'salary',authoritative['event_id']))
         assumptions.append(dict(category='salary',rule='explicit confirmed next regular salary supersedes inferred payroll',
                                 evidence_ids=[authoritative['event_id']]))

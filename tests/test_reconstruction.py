@@ -52,6 +52,27 @@ class ReconstructionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             reconstruct('2026-01-01', PROFILE, [event('missing','2026-01-02','')], [], {})
 
+    def test_confirmed_foreign_salary_uses_each_settlement_rate(self):
+        row=event('confirmed','2026-01-15','100','credit','scheduled','salary')
+        row.update(currency='EUR',description='Next confirmed salary')
+        rates={(day,'EUR','USD'):D(rate) for day,rate in
+               [('2026-01-15','1.1'),('2026-02-15','1.2'),('2026-03-15','1.3')]}
+        state=reconstruct('2026-01-01',PROFILE,[row],[],rates)
+        self.assertEqual([f.amount for f in state.ledger.flows],[D('110'),D('120'),D('130')])
+        del rates[('2026-02-15','EUR','USD')]
+        with self.assertRaisesRegex(ValueError,'Missing settlement-date FX rate'):
+            reconstruct('2026-01-01',PROFILE,[row],[],rates)
+
+    def test_inferred_foreign_expense_uses_nominal_amount_and_future_rates(self):
+        rows=[event('rent'+str(i),day,'100') for i,day in enumerate(
+            ['2025-10-02','2025-11-02','2025-12-02'])]
+        for row in rows: row['currency']='EUR'
+        rates={(row['settlement_date'],'EUR','USD'):D('1.9') for row in rows}
+        rates.update({(day,'EUR','USD'):D(rate) for day,rate in
+                      [('2026-01-02','1.1'),('2026-02-02','1.2'),('2026-03-02','1.3')]})
+        state=reconstruct('2026-01-01',PROFILE,rows,[],rates)
+        self.assertEqual([f.amount for f in state.ledger.flows],[D('-110'),D('-120'),D('-130')])
+
     def test_fx_rate_precision_is_not_currency_precision(self):
         repository=DatasetRepository(Path(__file__).resolve().parents[1]/'dataset')
         import csv
