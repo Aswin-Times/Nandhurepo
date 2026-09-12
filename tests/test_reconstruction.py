@@ -4,6 +4,7 @@ from pathlib import Path
 from decimal import Decimal as D
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'code'))
 from financial_reconstruction import reconstruct
+from dataset_repository import DatasetRepository
 
 def event(eid, day, amount, direction='debit', status='settled', category='rent', **kw):
     return dict(event_id=eid, settlement_date=day, event_date=day, amount=amount,
@@ -50,5 +51,13 @@ class ReconstructionTests(unittest.TestCase):
     def test_blank_amount_fails_closed(self):
         with self.assertRaises(ValueError):
             reconstruct('2026-01-01', PROFILE, [event('missing','2026-01-02','')], [], {})
+
+    def test_fx_rate_precision_is_not_currency_precision(self):
+        repository=DatasetRepository(Path(__file__).resolve().parents[1]/'dataset')
+        import csv
+        with (repository.dataset/'exchange_rates.csv').open(encoding='utf-8-sig') as f:
+            for rate in csv.DictReader(f):
+                key=(rate['rate_date'],rate['from_currency'],rate['to_currency'])
+                self.assertEqual(repository.rates[key],D(rate['rate']))
 
 if __name__ == '__main__': unittest.main()

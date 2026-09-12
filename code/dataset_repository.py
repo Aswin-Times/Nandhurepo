@@ -1,6 +1,7 @@
 """Allowlisted participant data loader and identifier-based context joins."""
 import csv
 import collections
+from decimal import Decimal
 from pathlib import Path
 from financial_ledger import money
 
@@ -21,7 +22,7 @@ class DatasetRepository:
             index=collections.defaultdict(list)
             for row in self.tables[name]: index[row[key]].append(row)
             self.index[name]=index
-        self.rates={(r['rate_date'],r['from_currency'],r['to_currency']):money(r['rate'])
+        self.rates={(r['rate_date'],r['from_currency'],r['to_currency']):Decimal(r['rate'])
                     for r in self.tables['exchange_rates']}
 
     def context(self,request):
