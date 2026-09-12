@@ -160,3 +160,29 @@ access and an explicitly selected image-capable OpenRouter model; then change on
 at a time with fresh checkpoints. A valid complete 25-row measurement is still required.
 Production logic, constants, prompts and golden hashes remain unchanged; no submission-ready
 claim or final release certification is warranted.
+
+## OR-LIVE-02 — user-requested free-model retry (2026-09-12)
+
+Starting commit fde9098. The user's local OPENROUTER_MODEL setting now selects
+`nvidia/nemotron-3-ultra-550b-a55b:free`; no agent-initiated model/configuration edit.
+Both required settings were loaded locally without exposing credentials. Public catalog
+prices are 0 input/0 output and architecture is text-only. Prompt and financial logic
+remain unchanged. New ignored retry01 artifacts preserve OR-LIVE-01 rather than resuming
+or overwriting its failed checkpoints.
+
+The first request_01 inference failed: sanitized ProviderError "OpenRouter connection
+failed", three bounded HTTP attempts, 183.735 seconds. No usable response, tool call,
+structured financial row, returned model identity or token/cost usage was received.
+This connection failure is distinct from the prior HTTP 402 and does NOT establish that
+billing/image issues are resolved. Catalog price zero does not substitute for measured
+usage: actual input/output tokens and charges are UNKNOWN, not reported as zero.
+
+Stopped before completing smoke or starting another 25-row public run. No prompt tuning,
+financial correction, golden re-pin, paid full 250-row run or final release was attempted.
+Public comparative result remains OR-LIVE-01's explicitly degraded 7/25 artifact, not a
+new free-model accuracy measurement. All 75 local tests pass; production source and
+tracked golden artifacts are unchanged. Exact-key/secret-format and report consistency
+checks pass; local .env, transcript and retry evidence remain ignored.
+
+Decision remains TUNE OPENROUTER, gated on a responsive endpoint and an explicitly chosen
+image-capable model. This failed retry provides no accuracy evidence for a different verdict.
