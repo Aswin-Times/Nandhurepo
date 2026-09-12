@@ -1,5 +1,9 @@
 # HackerRank Orchestrate
 
+Participant implementation: see [SOLUTION_README.md](./SOLUTION_README.md) for the agent,
+setup, tests, baseline evaluation and final-run commands. See [SPEC.md](./SPEC.md) for
+the executable contract and [EXPERIMENTS.md](./EXPERIMENTS.md) for measured decisions.
+
 Starter repository for the **HackerRank Orchestrate** 24-hour hackathon (September 2026).
 
 ## Buy or Wait?

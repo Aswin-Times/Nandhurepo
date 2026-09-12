@@ -1,0 +1,20 @@
+name: Contract tests
+on: [push, pull_request]
+jobs:
+  contract:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Full hermetic contract suite
+        run: python -m unittest discover -s tests -v
+      - name: Each test file in isolation
+        run: >-
+          python -c "import pathlib, subprocess, sys; files = sorted(pathlib.Path('tests').glob('test_*.py')); results = [subprocess.run([sys.executable, str(p)]).returncode for p in files]; sys.exit(any(results))"
+      - name: Compile entry points
+        run: python -m compileall -q code
