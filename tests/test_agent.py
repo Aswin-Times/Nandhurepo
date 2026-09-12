@@ -49,5 +49,24 @@ class AgentTests(unittest.TestCase):
         result=run_agent_loop(ScriptedModel([('evidence',{})]),BrokenTools(),{},lambda why:{'fallback':why},max_steps=1)
         self.assertEqual(result['usage']['input_tokens'],10)
         self.assertEqual(result['trace'][0]['result']['error']['code'],'internal_tool_error')
+    def test_real_financial_amendment_counterfactual(self):
+        from financial_tools import FinancialTools
+        from test_tools import FakeRepository,REQ
+        class Repository(FakeRepository):
+            def context(self,request):
+                context=super().context(request)
+                context['messages']=[dict(message_id='employer-update',sent_at='2025-12-30T00:00:00Z',
+                    source_type='employer',message_text='Salary USD 500 confirmed for 2026-01-05.')]
+                return context
+        request=dict(REQ,requested_amount='700')
+        amendment=dict(evidence_id='employer-update',quote='Salary USD 500 confirmed for 2026-01-05.',
+                       operation='add',amount='500',date='2026-01-05',direction='credit',category='salary')
+        for enabled,expected in ((True,'wait'),(False,'not_recommended')):
+            steps=[('retrieve_evidence',{}),('reconstruct_finances',{})]
+            if enabled:steps.extend([('apply_evidence_amendments',{'amendments':[amendment]}),('reconstruct_finances',{})])
+            steps.extend([('evaluate_payment_plans',{}),('finish_decision',{})])
+            tools=FinancialTools(Repository(),request,None)
+            result=run_agent_loop(ScriptedModel(steps),tools,request,tools.fallback)
+            self.assertEqual(result['row']['recommended_payment_method'],expected)
 
 if __name__=='__main__': unittest.main()
