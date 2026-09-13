@@ -225,3 +225,45 @@ ambiguity and previous results remain untouched. Final local regression: 75 test
 all 14 isolated files, unchanged 250-row golden and 100 independent plan replays pass;
 secret/report checks pass, offline release still correctly refused. No submission-ready
 claim is made and the required final hosted usage artifact remains pending.
+
+## OR-LIVE-04 — guarded Gemma smoke, rate limited (2026-09-13)
+
+Starting commit 079dcfa. User explicitly selected google/gemma-4-31b-it:free. Initial
+preflight detected the key but the saved .env still selected the unavailable Qwen model;
+process/user/machine model settings also did not match Gemma. Changed ONLY the local
+ignored OPENROUTER_MODEL line to the exact user-selected Gemma identifier, preserving
+the key. No financial logic, prompt, temperature, tools, finish interface or ranking edit.
+
+VERIFIED: current public catalog lists Gemma, advertises image/text/video input and tools,
+tool_choice, temperature, max_tokens, reasoning and response_format. Catalog input/output
+prices are zero. Advertised capability is not live image acceptance or responsiveness.
+The actual request_01 production-format inference used the unchanged system prompt,
+dataset request, FinancialTools definitions and OpenRouter adapter. It failed with
+HTTP 429 after three existing bounded HTTP attempts in 5.75 seconds. Failure category:
+rate limit. The sanitized HTTP status does not establish whether the limit is per-model,
+per-provider, per-account or free daily quota; raw provider bodies were not exposed.
+
+No usable model response, returned model identity, tool call, finish arguments or
+structured financial decision was received. Response parsing and deterministic final
+validation were not reached. Actual input/output tokens and charge are UNKNOWN, not
+fabricated as zero. Catalog-zero pricing does not replace missing measured usage.
+Ignored live-gemma01-meta.json and live-gemma01-first-failure.json preserve evidence.
+
+Stopped before further inference, smoke continuation or a new 25-example run. No
+financial accuracy, blast-radius or finish-interface before/after result can be claimed
+for this model. request_01 has no image evidence; existing real-adapter/real-tools mocked
+image integration verifies PNG base64 handoff through an untrusted user image_url block,
+image result incorporation and removal of private model-image content from traces.
+That verifies application transport in the fixture, not Gemma's live image acceptance.
+
+Final local regression: all 75 tests and 14 isolated files pass, including existing
+seven adversarial safety scenarios and evaluator/adapter negative controls. Offline
+250-row golden unchanged, 100 independent forecast-plan replays pass, public offline
+ablation hash unchanged. Secret/report checks pass; offline release still correctly
+refused. Credentials/log/scratch remain ignored. No final hosted usage report, ZIP,
+paid full-dataset run or submission-ready claim.
+
+Decision: SMOKE_FAILED — DIAGNOSE PROVIDER (HTTP 429 rate limit). Do not immediately
+retry or substitute another model; obtain a provider-permitted retry time or restore
+available quota before a new guarded smoke. Historical Qwen and previous failures remain
+unchanged, and the finish-tool ambiguity is not tuned without a successful live baseline.
