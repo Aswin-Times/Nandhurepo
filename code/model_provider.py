@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 
 MAX_RESPONSE_TOKENS=2400
 MAX_HTTP_ATTEMPTS=3
+AVAILABILITY_HTTP_STATUSES={402,408,429,500,502,503,504}
 
 def strict_object(pairs):
     result={}
@@ -26,9 +27,10 @@ def reject_constant(value):
     raise ValueError('Nonstandard JSON numeric constant')
 
 class ProviderError(RuntimeError):
-    def __init__(self,message,usage=None):
+    def __init__(self,message,usage=None,availability_failure=False):
         super().__init__(message)
         self.usage=usage or {}
+        self.availability_failure=availability_failure
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,req,fp,code,msg,headers,newurl):
@@ -39,20 +41,29 @@ class OpenRouterModel:
     def __init__(self,model=None,base_url=None,opener=None,sleeper=None):
         self._key=os.environ.get('OPENROUTER_API_KEY','').strip()
         if not self._key:raise ValueError('OPENROUTER_API_KEY is not configured for hosted inference')
+        self._fallback_key=os.environ.get('OPENROUTER_API_KEY_FALLBACK','').strip()
+        if self._fallback_key==self._key:self._fallback_key=''
+        self._keys=tuple(sorted({self._key,self._fallback_key}-{''},key=len,reverse=True))
         self.model=model or os.environ.get('OPENROUTER_MODEL','').strip()
         if not self.model:raise ValueError('Set OPENROUTER_MODEL or --model for hosted inference')
-        if self._key in self.model or not re.fullmatch(r'[A-Za-z0-9._:/-]+',self.model):
+        if any(key in self.model for key in self._keys) or not re.fullmatch(r'[A-Za-z0-9._:/-]+',self.model):
             raise ValueError('Invalid hosted model identifier')
         base=(base_url or os.environ.get('OPENROUTER_BASE_URL') or 'https://openrouter.ai/api/v1').rstrip('/')
         parts=urllib.parse.urlsplit(base)
-        if parts.scheme!='https' or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment or self._key in base:
+        if parts.scheme!='https' or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment or any(key in base for key in self._keys):
             raise ValueError('OPENROUTER_BASE_URL must be a credential-free HTTPS API base URL')
         self.base_url=base
         self._open=opener or urllib.request.build_opener(NoRedirect()).open
         self._sleep=sleeper or time.sleep
 
+    @property
+    def max_http_attempts(self):
+        return MAX_HTTP_ATTEMPTS*(2 if self._fallback_key else 1)
+
     def _redact(self,value):
-        if isinstance(value,str):return value.replace(self._key,'[REDACTED]')
+        if isinstance(value,str):
+            for key in self._keys:value=value.replace(key,'[REDACTED]')
+            return value
         if isinstance(value,list):return [self._redact(v) for v in value]
         if isinstance(value,dict):return {self._redact(k):self._redact(v) for k,v in value.items()}
         return value
@@ -172,32 +183,46 @@ class OpenRouterModel:
                          messages=self._messages(system,messages),tool_choice='auto',
                          tools=[dict(type='function',function=dict(name=t['name'],description=t['description'],parameters=t['input_schema'])) for t in tools],
                          provider={'require_parameters':True})
-            request=urllib.request.Request(self.base_url+'/chat/completions',data=json.dumps(self._redact(payload),ensure_ascii=False).encode(),
-                        method='POST',headers={'Content-Type':'application/json','Authorization':'Bearer '+self._key})
+            body=json.dumps(self._redact(payload),ensure_ascii=False).encode()
+        except Exception:
+            raise ProviderError('Invalid OpenRouter request configuration') from None
+        try:return self._complete_with_key(body,self._key)
+        except ProviderError as error:
+            if not self._fallback_key or not error.availability_failure:raise
+            prior_attempts=error.usage.get('http_attempts',0)
+        # Exactly one secondary phase; never mutate the primary or recurse.
+        return self._complete_with_key(body,self._fallback_key,prior_attempts)
+
+    def _complete_with_key(self,body,key,prior_attempts=0):
+        try:
+            request=urllib.request.Request(self.base_url+'/chat/completions',data=body,
+                        method='POST',headers={'Content-Type':'application/json','Authorization':'Bearer '+key})
         except Exception:
             raise ProviderError('Invalid OpenRouter request configuration') from None
         for attempt in range(1,MAX_HTTP_ATTEMPTS+1):
+            total_attempts=prior_attempts+attempt
             delay=2**(attempt-1)
             try:
                 with self._open(request,timeout=60) as response:
                     try:data=json.load(response)
                     except (ValueError,UnicodeError):
-                        raise ProviderError('OpenRouter returned invalid JSON',dict(http_attempts=attempt,usage_missing_calls=1)) from None
-                return self._normalize(data,attempt)
+                        raise ProviderError('OpenRouter returned invalid JSON',dict(http_attempts=total_attempts,usage_missing_calls=1)) from None
+                return self._normalize(data,total_attempts)
             except ProviderError:raise
             except urllib.error.HTTPError as error:
                 if error.code not in {408,429,500,502,503,504} or attempt==MAX_HTTP_ATTEMPTS:
-                    raise ProviderError('OpenRouter request failed with HTTP '+str(error.code),dict(http_attempts=attempt,usage_missing_calls=1)) from None
+                    raise ProviderError('OpenRouter request failed with HTTP '+str(error.code),dict(http_attempts=total_attempts,usage_missing_calls=1),
+                                        availability_failure=error.code in AVAILABILITY_HTTP_STATUSES) from None
                 retry_after=(error.headers or {}).get('Retry-After','')
                 try:
                     suggested=float(retry_after)
-                    if suggested>60:raise ProviderError('OpenRouter rate limit requires a later retry',dict(http_attempts=attempt,usage_missing_calls=1)) from None
+                    if suggested>60:raise ProviderError('OpenRouter rate limit requires a later retry',dict(http_attempts=total_attempts,usage_missing_calls=1),availability_failure=True) from None
                     if suggested>0:delay=max(delay,suggested)
                 except ValueError:pass
             except (urllib.error.URLError,TimeoutError,OSError):
                 if attempt==MAX_HTTP_ATTEMPTS:
-                    raise ProviderError('OpenRouter connection failed',dict(http_attempts=attempt,usage_missing_calls=1)) from None
+                    raise ProviderError('OpenRouter connection failed',dict(http_attempts=total_attempts,usage_missing_calls=1),availability_failure=True) from None
             except Exception:
-                raise ProviderError('OpenRouter transport failed',dict(http_attempts=attempt,usage_missing_calls=1)) from None
+                raise ProviderError('OpenRouter transport failed',dict(http_attempts=total_attempts,usage_missing_calls=1)) from None
             self._sleep(delay)
-        raise ProviderError('OpenRouter retries exhausted')
+        raise ProviderError('OpenRouter retries exhausted',availability_failure=True)

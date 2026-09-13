@@ -12,6 +12,14 @@ class MockProvider:
         return dict(content=[],usage=dict(input_tokens=100,output_tokens=50))
 
 class UsageTests(unittest.TestCase):
+    def test_budget_reserves_both_bounded_key_phases_before_network(self):
+        provider=MockProvider();provider.max_http_attempts=6;provider.calls=0
+        with self.assertRaises(RuntimeError):BudgetedModel(provider,0.02,1,1).complete('test',[],[])
+        self.assertEqual(provider.calls,0)
+        ordinary=MockProvider();ordinary.calls=0
+        BudgetedModel(ordinary,0.02,1,1).complete('test',[],[])
+        self.assertEqual(ordinary.calls,1)
+
     def test_budget_uses_reported_charge_and_persists_failed_reservation(self):
         from model_provider import ProviderError
         from model_usage import aggregate_usage,reconciled_cost

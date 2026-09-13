@@ -28,7 +28,7 @@ class BudgetedModel:
     def complete(self,system,messages,tools):
         # UTF-8 bytes upper-bound raw tokenizer units; add room for protocol framing.
         envelope=len(json.dumps([system,messages,tools],ensure_ascii=False).encode('utf-8'))+2000
-        reservation=(D(envelope)*self.input_price+D(2400)*self.output_price)/1000000*3
+        reservation=(D(envelope)*self.input_price+D(2400)*self.output_price)/1000000*getattr(self.provider,'max_http_attempts',3)
         if self.used+reservation>self.budget:raise RuntimeError('Configured model budget exhausted before request')
         try:result=self.provider.complete(system,messages,tools)
         except Exception as error:

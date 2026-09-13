@@ -25,6 +25,13 @@ environment. Choose an OpenRouter model supporting native function tools and ima
 not every routed model supports both. `--model` overrides the environment model. Never put
 a key in code or chat. `.env.example` lists configuration names; `.env` files are ignored and
 are not automatically loaded. Use a trusted local environment/credential manager.
+Optionally export `OPENROUTER_API_KEY_FALLBACK` for one bounded secondary-key phase.
+Every completion starts with the primary key and keeps the exact same model/body.
+Only HTTP 402/408/429/500/502/503/504 or exhausted connection/timeout retries qualify.
+Each key uses the existing three-attempt policy (at most six HTTP attempts total).
+No fallback occurs for request/auth errors, ambiguous 404s, malformed responses,
+application/tool errors or financial/finish validation. Empty/identical secondary keys
+disable fallback. Both keys are redacted; do not put either value in code or chat.
 `OPENROUTER_BASE_URL` optionally overrides the HTTPS API base (default
 `https://openrouter.ai/api/v1`); use only a trusted proxy because it receives the credential.
 No direct-provider credentials or SDK are required. Supply the model's current prices
@@ -71,7 +78,7 @@ The adapter is standard-library HTTP, injectable for tests. It retries transient
 failures at most three times, uses a 60-second per-attempt timeout, honors numeric Retry-After
 up to 60 seconds, and refuses longer waits for a later resume. Malformed/embedded-error responses
 are not automatically retried because they may already be billed. Error bodies/headers are never
-logged; exceptions are sanitized and returned content redacts the configured key. Redirects are
+logged; exceptions are sanitized and returned content redacts both configured keys. Redirects are
 disabled so authorization cannot be forwarded. Tests mock HTTP, never a fake provider replacement.
 
 Tokens are actual OpenRouter prompt/completion usage normalized to input/output fields.

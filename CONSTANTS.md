@@ -16,11 +16,11 @@
 | Output repair | 1 retry | BOUND | Second rejected finish falls back |
 | Model temperature | 0 | JUDGEMENT | Reduces hosted variation; does not establish bit stability |
 | Maximum model response | 2400 tokens | BOUND | Limits each response, not entire batch |
-| HTTP attempts | 3 | BOUND | Retry transient status/network failure |
+| HTTP attempts | 3 per key; at most 6 with secondary | BOUND | Primary first; one optional secondary availability phase, same model/request |
 | HTTP retry sleep | 1 then 2 seconds, or larger numeric Retry-After | JUDGEMENT / HTTP contract | Never retry sooner than supplied seconds; >60 seconds requires later resume |
 | HTTP timeout | 60 seconds | BOUND | Avoid indefinite model call |
 | Budget framing allowance | 2000 raw token units | JUDGEMENT | Conservative reservation alongside UTF-8 payload-byte bound |
-| Budget retry factor | 3 | BOUND / JUDGEMENT | Reserve all possible attempts; not an account billing guarantee for routed/image/cache prices |
+| Budget retry factor | Adapter bound: 3 or 6 | BOUND / JUDGEMENT | Reserve all possible key phases; not an account billing guarantee for routed/image/cache prices |
 | OpenRouter default base | https://openrouter.ai/api/v1 | STANDARD provider contract | HTTPS-only overrides; credentials, URL queries and redirects rejected |
 | Controlled smoke limit | 1 request | BOUND | Explicit --limit; sample/full experiments are separate steps |
 | Budget default | USD 10 | JUDGEMENT | Configurable; requires actual selected model prices |

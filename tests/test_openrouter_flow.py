@@ -18,6 +18,27 @@ from independent_validation import replay_safe
 from test_provider import ENV,SENTINEL,completion,wire_response
 
 class OpenRouterFlowTests(unittest.TestCase):
+    def test_both_key_failures_preserve_safe_batch_and_redact_both_credentials(self):
+        import urllib.error
+        from test_provider import KeyFallbackTests
+        secondary=KeyFallbackTests.secondary
+        opener=Mock(side_effect=[urllib.error.HTTPError('https://redacted',429,SENTINEL,{},None)]*3+
+                               [urllib.error.HTTPError('https://redacted',503,secondary,{},None)]*3)
+        with patch.dict(os.environ,dict(ENV,OPENROUTER_API_KEY_FALLBACK=secondary),clear=True):
+            model=OpenRouterModel(opener=opener,sleeper=Mock())
+        with tempfile.TemporaryDirectory() as tmp,contextlib.redirect_stdout(io.StringIO()):
+            root=Path(tmp);out=root/'output.csv';checkpoint=root/'checkpoint.jsonl';usage=root/'usage.md'
+            report=run(ROOT/'dataset',out,checkpoint,samples=True,model=ENV['OPENROUTER_MODEL'],
+                       limit=1,provider_instance=model,usage_report=usage,cache_dir=root/'ocr')
+            record=json.loads(checkpoint.read_text())
+            self.assertEqual(opener.call_count,6)
+            self.assertEqual(record['row']['recommended_payment_method'],'not_recommended')
+            self.assertEqual(record['row']['payment_plan'],'none')
+            self.assertEqual(record['usage']['http_attempts'],6)
+            self.assertEqual(report['fallback_rows'],1)
+            diagnostics=out.read_text()+checkpoint.read_text()+usage.read_text()+json.dumps(report)
+            for credential in (SENTINEL,secondary):self.assertNotIn(credential,diagnostics)
+
     def test_public_labels_never_reach_production_wire_or_financial_tools(self):
         from dataset_repository import DatasetRepository
         input_fields=('request_id','user_id','request_date','request_type','requested_amount',

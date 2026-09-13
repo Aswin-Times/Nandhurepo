@@ -165,4 +165,146 @@ class ProviderTests(unittest.TestCase):
         request=__import__('urllib.request',fromlist=['Request']).Request('https://openrouter.ai',headers={'Authorization':'Bearer '+SENTINEL})
         self.assertIsNone(NoRedirect().redirect_request(request,None,302,'redirect',{},'https://other.example'))
 
+class KeyFallbackTests(unittest.TestCase):
+    secondary='dummy-secondary-credential-not-a-real-key'
+
+    def make_model(self,opener,secondary=None,**kwargs):
+        env=dict(ENV,OPENROUTER_API_KEY_FALLBACK=self.secondary if secondary is None else secondary)
+        with patch.dict(os.environ,env,clear=True):
+            return OpenRouterModel(opener=opener,sleeper=kwargs.pop('sleeper',Mock()),**kwargs)
+
+    def error(self,status):
+        return urllib.error.HTTPError('https://redacted',status,'sanitized fixture',{},None)
+
+    def assert_phases(self,opener,primary,secondary):
+        calls=opener.call_args_list
+        self.assertEqual(len(calls),primary+secondary)
+        for index,call in enumerate(calls):
+            self.assertEqual(call.args[0].get_header('Authorization'),'Bearer '+(SENTINEL if index<primary else self.secondary))
+            self.assertEqual(json.loads(call.args[0].data)['model'],ENV['OPENROUTER_MODEL'])
+            self.assertEqual(call.args[0].data,calls[0].args[0].data)
+
+    def test_primary_success_never_uses_secondary_and_next_call_starts_primary(self):
+        opener=Mock(side_effect=[wire_response(completion()),wire_response(completion())])
+        model=self.make_model(opener)
+        for _ in range(2):model.complete('system',[],[])
+        self.assert_phases(opener,2,0)
+        self.assertEqual(model.max_http_attempts,6)
+
+    def test_429_exhausts_primary_then_returns_secondary_response(self):
+        data=completion();data['choices'][0]['message']['content']='secondary response'
+        opener=Mock(side_effect=[self.error(429) for _ in range(3)]+[wire_response(data),wire_response(completion())])
+        model=self.make_model(opener)
+        result=model.complete('system',[],[])
+        self.assert_phases(opener,3,1)
+        self.assertEqual(result['content'][0]['text'],'secondary response')
+        self.assertEqual(result['usage']['http_attempts'],4)
+        model.complete('system',[],[])
+        self.assertEqual(opener.call_args.args[0].get_header('Authorization'),'Bearer '+SENTINEL)
+
+    def test_provider_unavailable_uses_secondary_once(self):
+        for status in (408,500,502,503,504):
+            with self.subTest(status=status):
+                opener=Mock(side_effect=[self.error(status) for _ in range(3)]+[wire_response(completion())])
+                self.make_model(opener).complete('system',[],[])
+                self.assert_phases(opener,3,1)
+
+    def test_quota_402_uses_secondary_without_retrying_primary(self):
+        opener=Mock(side_effect=[self.error(402),wire_response(completion())])
+        result=self.make_model(opener).complete('system',[],[])
+        self.assert_phases(opener,1,1)
+        self.assertEqual(result['usage']['http_attempts'],2)
+
+    def test_permanent_request_auth_and_ambiguous_404_never_fallback(self):
+        for status in (400,401,403,404):
+            with self.subTest(status=status):
+                opener=Mock(side_effect=self.error(status))
+                with self.assertRaises(ProviderError):self.make_model(opener).complete('system',[],[])
+                self.assert_phases(opener,1,0)
+
+    def test_valid_but_incorrect_answer_never_triggers_fallback(self):
+        data=completion();data['choices'][0]['message']['content']='incorrect illustrative decision'
+        opener=Mock(return_value=wire_response(data))
+        result=self.make_model(opener).complete('system',[],[])
+        self.assertNotEqual(result['content'][0]['text'],'expected correct illustrative decision')
+        self.assert_phases(opener,1,0)
+
+    def test_both_keys_fail_with_original_sanitized_failure_contract(self):
+        opener=Mock(side_effect=[self.error(429) for _ in range(6)])
+        with self.assertRaises(ProviderError) as caught:self.make_model(opener).complete('system',[],[])
+        self.assert_phases(opener,3,3)
+        self.assertEqual(str(caught.exception),'OpenRouter request failed with HTTP 429')
+        self.assertEqual(caught.exception.usage['http_attempts'],6)
+        self.assertEqual(caught.exception.usage['usage_missing_calls'],1)
+
+    def test_secondary_permanent_failure_does_not_recurse(self):
+        opener=Mock(side_effect=[self.error(429) for _ in range(3)]+[self.error(400)])
+        with self.assertRaises(ProviderError) as caught:self.make_model(opener).complete('system',[],[])
+        self.assert_phases(opener,3,1)
+        self.assertIn('HTTP 400',str(caught.exception))
+        self.assertEqual(caught.exception.usage['http_attempts'],4)
+
+    def test_secondary_application_error_keeps_total_attempt_count_and_does_not_recurse(self):
+        opener=Mock(side_effect=[self.error(429) for _ in range(3)]+[RuntimeError('fixture application error')])
+        with self.assertRaises(ProviderError) as caught:self.make_model(opener).complete('system',[],[])
+        self.assert_phases(opener,3,1)
+        self.assertEqual(caught.exception.usage['http_attempts'],4)
+
+    def test_timeout_and_connection_failure_are_availability_failures(self):
+        for error in (TimeoutError('fixture'),urllib.error.URLError('fixture'),OSError('fixture')):
+            with self.subTest(error_type=type(error).__name__):
+                opener=Mock(side_effect=[error]*3+[wire_response(completion())])
+                self.make_model(opener).complete('system',[],[])
+                self.assert_phases(opener,3,1)
+
+    def test_malformed_output_invalid_tool_arguments_and_application_errors_do_not_fallback(self):
+        for response in (io.BytesIO(b'not JSON'),wire_response({}),wire_response(completion('read','{broken'))):
+            opener=Mock(return_value=response)
+            try:self.make_model(opener).complete('system',[],[TOOL])
+            except ProviderError:pass
+            self.assert_phases(opener,1,0)
+        opener=Mock(side_effect=RuntimeError('fixture application error'))
+        with self.assertRaises(ProviderError):self.make_model(opener).complete('system',[],[])
+        self.assert_phases(opener,1,0)
+        opener=Mock()
+        with self.assertRaises(ProviderError):self.make_model(opener).complete('system',[],[{}])
+        opener.assert_not_called()
+        opener=Mock()
+        with patch('model_provider.urllib.request.Request',side_effect=ValueError(self.secondary)):
+            with self.assertRaises(ProviderError) as caught:self.make_model(opener).complete('system',[],[])
+        self.assertNotIn(self.secondary,str(caught.exception));opener.assert_not_called()
+
+    def test_secondary_malformed_response_fails_without_another_key_phase(self):
+        opener=Mock(side_effect=[self.error(429) for _ in range(3)]+[wire_response({})])
+        with self.assertRaises(ProviderError) as caught:self.make_model(opener).complete('system',[],[])
+        self.assert_phases(opener,3,1)
+        self.assertEqual(caught.exception.usage['http_attempts'],4)
+
+    def test_both_credentials_redacted_from_payload_response_and_diagnostics(self):
+        data=completion();data['choices'][0]['message']['content']=SENTINEL+' '+self.secondary
+        opener=Mock(return_value=wire_response(data));model=self.make_model(opener)
+        result=model.complete(SENTINEL+' '+self.secondary,[],[])
+        diagnostics=json.dumps(result)+repr(model)+opener.call_args.args[0].data.decode()+json.dumps(model._redact({self.secondary:SENTINEL}))
+        for credential in (SENTINEL,self.secondary):self.assertNotIn(credential,diagnostics)
+        for credential in (SENTINEL,self.secondary):
+            opener=Mock(side_effect=urllib.error.URLError(credential))
+            try:self.make_model(opener).complete('system',[],[])
+            except ProviderError as error:
+                self.assertNotIn(credential,traceback.format_exc()+repr(error)+json.dumps(error.usage))
+            else:self.fail('Failure unexpectedly accepted')
+
+    def test_secondary_credentials_cannot_be_embedded_in_model_or_base_url(self):
+        for kwargs in ({'model':self.secondary},{'base_url':'https://proxy.example/'+self.secondary}):
+            with self.assertRaises(ValueError):self.make_model(Mock(),**kwargs)
+
+    def test_duplicate_secondary_is_disabled_and_long_retry_after_remains_bounded(self):
+        opener=Mock(side_effect=self.error(429));model=self.make_model(opener,secondary=SENTINEL)
+        with self.assertRaises(ProviderError):model.complete('system',[],[])
+        self.assert_phases(opener,3,0)
+        self.assertEqual(model.max_http_attempts,3)
+        error=urllib.error.HTTPError('https://redacted',429,'fixture',{'Retry-After':'120'},None)
+        opener=Mock(side_effect=[error,wire_response(completion())]);sleeper=Mock()
+        self.make_model(opener,sleeper=sleeper).complete('system',[],[])
+        self.assert_phases(opener,1,1);sleeper.assert_not_called()
+
 if __name__=='__main__':unittest.main()

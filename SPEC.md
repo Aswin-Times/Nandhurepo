@@ -55,3 +55,26 @@ real-tool batch/report/replay and synthetic full ZIP packaging, key-free offline
 unchanged 250-row and 25-row hashes, and 100 independent participant-plan validations.
 Live smoke and public hosted accuracy require environment configuration; mocks cannot establish
 live compatibility or improved financial correctness. Only optimize accuracy after those gates.
+
+## Bounded secondary-key availability fallback
+
+Optional OPENROUTER_API_KEY_FALLBACK is read once by the existing adapter. Each model
+completion starts with the primary key; the same serialized request and model may use
+the secondary key only after a classified availability failure. Each key gets the existing
+three-attempt HTTP policy, with at most one secondary phase (six total HTTP attempts).
+Missing/empty or identical secondary values preserve single-key behavior; no rotation.
+
+Eligible failures: HTTP 402 quota, 408, 429, 500, 502, 503, 504, and exhausted existing
+connection/timeout retries. HTTP 400/401/403/404, invalid input/tools, malformed model
+responses, application bugs and financial/finish validation failures never trigger fallback.
+An ambiguous 404 is deliberately not assumed to mean temporary provider unavailability.
+Long Retry-After still ends that key's phase rather than sleeping beyond the existing bound.
+Both credentials are redacted from request bodies, responses, errors and diagnostics;
+only the selected Authorization header carries a key. HTTP usage counts both phases;
+missing response usage is never fabricated. Budget reservation covers the adapter's
+three- or six-attempt bound; failed/retried charges can remain unreported by the provider.
+
+Acceptance: real adapter with mocked HTTP, primary-first/no-extra-key success, bounded
+availability fallback, forbidden-error controls, identical model/body, next-call primary
+reset, six-attempt failure safety, dual-key redaction and pre-network budget reservation.
+Financial modules, prompt/tools/finish, label-free input projection and golden files stay unchanged.
