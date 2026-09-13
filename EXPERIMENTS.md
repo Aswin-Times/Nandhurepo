@@ -267,3 +267,41 @@ Decision: SMOKE_FAILED — DIAGNOSE PROVIDER (HTTP 429 rate limit). Do not immed
 retry or substitute another model; obtain a provider-permitted retry time or restore
 available quota before a new guarded smoke. Historical Qwen and previous failures remain
 unchanged, and the finish-tool ambiguity is not tuned without a successful live baseline.
+
+## OR-LIVE-05 — exactly one inference attempt, still HTTP 429 (2026-09-13)
+
+Starting commit aecb3c9. Local .env has two OPENROUTER_API_KEY assignments and three
+OPENROUTER_MODEL assignments, not separately named rotation/pairing settings. Existing
+loader uses last assignment for each variable. No secrets were exposed; no local
+configuration edit or key rotation performed. Effective model google/gemma-4-31b-it:free.
+Current catalog: nvidia/nemotron-3-ultra-550b-a55b:free is listed with tools but text-only;
+google/gemma-4-26b-a4b:free is absent; effective Gemma31 is listed with tools and images.
+No direct Anthropic dependency/configuration is used by code/tests/requirements/env example.
+
+Exactly ONE inference HTTP attempt sent for request_01 through the actual OpenRouter
+adapter with production prompt, dataset request and FinancialTools definitions. An ignored
+caller-side egress cap stops failures before the adapter retries: no source retry-policy
+edit, model/prompt/interface/financial/validator/dataset/golden change. No second key or
+alternate model was tried. MEASURED: HTTP 429, 0.906 seconds, one attempt, no usable model
+response. Classification RATE_LIMIT. Tool calls did not occur; response parsing/final
+deterministic validation were not reached. request_01 requires no image, so image acceptance
+was not exercised. No financial model-quality or comparative-accuracy evidence obtained.
+
+UNKNOWN: token usage, returned model identity, actual billed charge, estimated inference
+cost from tokens and exact limiter scope/reset time. Current catalog prices are zero,
+but absent usage is not fabricated as measured zero tokens/cost. Key presence and model
+catalog compatibility do not prove authentication/quota status. Provider raw bodies/headers
+and credential values were not printed or retained. Ignored live-single01-result.json
+preserves the status/latency/attempt and capability evidence.
+
+The local one-attempt negative control initially encountered Windows SSL initialization
+under a cleared test environment; injected a mock opener rather than constructing TLS
+in that fixture. Corrected harness control proves a mocked 429 causes exactly one opener
+call and no sleep. This fixture error was not a production compatibility defect and did
+not cause the live HTTP429. No application architecture or retry implementation change.
+
+Stopped hosted work immediately. Offline full golden reproduction remains unchanged;
+no new public25/full250 hosted evaluation, tuning, re-pin, ZIP or final hosted report.
+Credentials/transcript/scratch remain ignored. Previous successful/failed measurements
+are preserved as history. Decision: RATE_LIMIT — provider-side live inference remains
+blocked; obtain available quota/provider-permitted retry timing before further smoke.
