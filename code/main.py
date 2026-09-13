@@ -8,7 +8,7 @@ from pathlib import Path
 from batch_execution import execute_batch
 from dataset_repository import DatasetRepository
 from evidence_media import ImageEvidence
-from financial_agent import run_agent_loop
+from financial_agent import run_agent_loop,request_input
 from financial_tools import FinancialTools
 from model_provider import OpenRouterModel
 from model_usage import BudgetedModel,write_usage_report,aggregate_usage,reconciled_cost
@@ -33,7 +33,7 @@ def run(dataset,output,checkpoint,provider='openrouter',model='',samples=False,b
     if instance and not model:model=instance.model
     repository=DatasetRepository(dataset)
     media=ImageEvidence(dataset,cache_dir if cache_dir is not None else ROOT/'.cache'/'ocr')
-    requests=repository.tables['sample_requests' if samples else 'requests']
+    requests=[request_input(row) for row in repository.tables['sample_requests' if samples else 'requests']]
     if limit is not None:requests=requests[:limit]
     config=dict(provider=provider,model=model,samples=samples,budget=budget,input_price=input_price,output_price=output_price)
     if limit is not None:config['limit']=limit

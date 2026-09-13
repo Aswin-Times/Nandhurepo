@@ -18,6 +18,58 @@ from independent_validation import replay_safe
 from test_provider import ENV,SENTINEL,completion,wire_response
 
 class OpenRouterFlowTests(unittest.TestCase):
+    def test_public_labels_never_reach_production_wire_or_financial_tools(self):
+        from dataset_repository import DatasetRepository
+        input_fields=('request_id','user_id','request_date','request_type','requested_amount',
+                      'desired_completion_date','allows_partial_payment','request_text')
+        labels=('amount_safe_to_pay','affordability_status','recommended_payment_method',
+                'payment_plan','earliest_date_for_full_payment','spending_changes_needed','decision_explanation')
+        repository=DatasetRepository(ROOT/'dataset')
+        source=repository.tables['sample_requests'][0]
+        source.update({key:'EVALUATOR_ONLY_CANARY_'+key for key in labels})
+        source['affordability_status']='affordable_now'  # Known expected-label negative control.
+        source['expected_answer_blob']={'renamed_label':'EVALUATOR_ONLY_CANARY_renamed'}
+        saved=dict(source)
+        opener=Mock(side_effect=[wire_response(completion(name)) for name in
+                                ('retrieve_evidence','reconstruct_finances','evaluate_payment_plans','finish_decision')])
+        with patch.dict(os.environ,ENV,clear=True):model=OpenRouterModel(opener=opener,sleeper=Mock())
+        with tempfile.TemporaryDirectory() as tmp,contextlib.redirect_stdout(io.StringIO()),\
+             patch('main.DatasetRepository',return_value=repository),patch('main.FinancialTools',wraps=FinancialTools) as factory:
+            run(ROOT/'dataset',Path(tmp)/'output.csv',Path(tmp)/'checkpoint.jsonl',samples=True,
+                model=ENV['OPENROUTER_MODEL'],limit=1,provider_instance=model,cache_dir=Path(tmp)/'ocr')
+        self.assertEqual(opener.call_count,4)
+        for call in opener.call_args_list:
+            wire=json.loads(call.args[0].data)
+            initial=wire['messages'][1]['content']
+            payload=json.loads(initial.removeprefix('<input trust="untrusted">').removesuffix('</input>'))
+            self.assertEqual(set(payload),set(input_fields))
+            self.assertTrue(set(labels).isdisjoint(payload))
+            self.assertEqual(payload,{key:saved[key] for key in input_fields})
+            self.assertNotIn('EVALUATOR_ONLY_CANARY_',json.dumps(wire))
+        self.assertEqual(set(factory.call_args.args[1]),set(input_fields))
+        self.assertEqual(source,saved)  # Evaluator labels remain available and unmodified.
+
+    def test_all_25_public_initial_wire_payloads_are_label_free(self):
+        from dataset_repository import DatasetRepository
+        input_fields=('request_id','user_id','request_date','request_type','requested_amount',
+                      'desired_completion_date','allows_partial_payment','request_text')
+        repository=DatasetRepository(ROOT/'dataset')
+        self.assertEqual(len(repository.tables['sample_requests']),25)
+        for source in repository.tables['sample_requests']:
+            with self.subTest(request_id=source['request_id']):
+                saved=dict(source)
+                request=dict(source,expected_answer_blob={'answer':'EVALUATOR_ONLY_CANARY_renamed'})
+                opener=Mock(return_value=wire_response(completion('retrieve_evidence')))
+                with patch.dict(os.environ,ENV,clear=True):model=OpenRouterModel(opener=opener,sleeper=Mock())
+                tools=FinancialTools(repository,request,None)
+                run_agent_loop(model,tools,request,tools.fallback,max_steps=1)
+                wire=json.loads(opener.call_args.args[0].data)
+                payload=json.loads(wire['messages'][1]['content'].removeprefix('<input trust="untrusted">').removesuffix('</input>'))
+                self.assertEqual(payload,{key:source[key] for key in input_fields})
+                self.assertNotIn('EVALUATOR_ONLY_CANARY_',json.dumps(wire))
+                self.assertEqual(opener.call_count,1)
+                self.assertEqual(source,saved)
+
     def test_default_hosted_configuration_and_old_provider_rejected(self):
         with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{},clear=True):
             with self.assertRaisesRegex(ValueError,'OPENROUTER_API_KEY'):

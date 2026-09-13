@@ -5,8 +5,15 @@ from model_usage import aggregate_usage
 
 MAX_AGENT_STEPS = 12
 
+REQUEST_INPUT_FIELDS=('request_id','user_id','request_date','request_type','requested_amount',
+                      'desired_completion_date','allows_partial_payment','request_text')
+
+def request_input(request):
+    """Project the specified input schema; sample answers stay evaluator-only."""
+    return {key:request[key] for key in REQUEST_INPUT_FIELDS if key in request}
+
 def run_agent_loop(model, tools, request, fallback, max_steps=MAX_AGENT_STEPS):
-    messages=[dict(role='user',content='<input trust="untrusted">'+json.dumps(request,ensure_ascii=False)+'</input>')]
+    messages=[dict(role='user',content='<input trust="untrusted">'+json.dumps(request_input(request),ensure_ascii=False)+'</input>')]
     usage=dict(input_tokens=0,output_tokens=0,model_calls=0)
     trace=[]
     finish_failures=0
