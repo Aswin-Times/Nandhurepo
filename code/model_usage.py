@@ -51,6 +51,23 @@ def write_usage_report(path,records,provider,model,input_price,output_price,fing
     result=dict(**usage,total_tokens=total,average_tokens_per_request=total/count if count else 0,
                 estimated_cost_usd=float(cost),average_cost_usd=float(cost)/count if count else 0,
                 usage_complete=not usage['usage_missing_calls'])
+    events=[e for r in records for e in r.get('http_events',[])]
+    statuses={};phases={};logical={}
+    for e in events:
+        status=str(e['status']) if e.get('status') is not None else 'NETWORK/NO_HTTP'
+        statuses[status]=statuses.get(status,0)+1
+        phase=e['key_phase'];phases[phase]=phases.get(phase,0)+1
+        logical.setdefault((e.get('request_id'),e.get('logical_call')),[]).append(e)
+    http=dict(attempts=len(events),statuses=statuses,key_phases=phases,
+              fallback_activations=sum(any(e['key_phase']=='fallback' for e in group) for group in logical.values()),
+              fallback_recoveries=sum(any(e['key_phase']=='fallback' and e.get('status')==200 for e in group) for group in logical.values()),
+              missing_attempt_usage=sum(e.get('input_tokens') is None or e.get('output_tokens') is None for e in events),
+              measured_input_tokens=sum(e.get('input_tokens') or 0 for e in events),
+              measured_output_tokens=sum(e.get('output_tokens') or 0 for e in events),
+              measured_total_tokens=sum(e.get('total_tokens') or 0 for e in events),
+              reported_cost_attempts=sum(e.get('reported_cost_usd') is not None for e in events))
+    result['http_diagnostics']=http
+    if http['missing_attempt_usage']:result['usage_complete']=False
     text=(f"# Model usage report\n\nProvider: {provider}. Model: {model or 'none'}. Requests: {count}.\n\n"
           f"| Calls | Input tokens | Output tokens | Total tokens | Average tokens/request |\n|---|---|---|---|---|\n"
           f"| {usage['model_calls']} | {usage['input_tokens']} | {usage['output_tokens']} | {total} | {result['average_tokens_per_request']:.2f} |\n\n"
@@ -62,6 +79,13 @@ def write_usage_report(path,records,provider,model,input_price,output_price,fing
           f"Input/config fingerprint: `{fingerprint}`. Output SHA-256: `{output_hash}`.\n\n"
           "Usage is summed from the row checkpoints of this run, including resumed rows. Hosted calls are measured from provider usage, not guessed from text length. "
           "Failed HTTP requests without returned usage cannot be reconciled from the API response. Retry attempts without returned usage may incur unmeasured charges; configured-price estimates exclude such charges. Development-chat tokens are not the submitted runtime's model usage.\n")
+    if events:
+        text+=('\n## Per-attempt reconciliation\n\n'
+               f"HTTP/network attempts observed: {http['attempts']}; statuses: {json.dumps(statuses,sort_keys=True)}.\n"
+               f"Key phases: {json.dumps(phases,sort_keys=True)}; fallback activations: {http['fallback_activations']}; recoveries: {http['fallback_recoveries']}.\n"
+               f"Attempts without token usage: {http['missing_attempt_usage']}; attempts with reported cost: {http['reported_cost_attempts']}.\n"
+               f"HTTP usage completeness: {'INCOMPLETE' if http['missing_attempt_usage'] else 'complete'}. "
+               'Tokens and provider charges above are measured-response subtotals; total cost UNKNOWN when any attempt has no returned cost.\n')
     if provider=='offline':text+='\nThis is an OFFLINE BASELINE, not a hosted-agent evaluation. No paid model calls occurred.\n'
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text,encoding='utf-8')
     return result

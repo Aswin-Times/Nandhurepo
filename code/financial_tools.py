@@ -68,14 +68,14 @@ class FinancialTools:
         definition('resolve_image_amount','Record image-derived event amount with an exact supporting OCR quote. Only linked missing amounts.',
                    {'image_id':{'type':'string'},'amount':{'type':'string'},'quote':{'type':'string'}},['image_id','amount','quote']),
         definition('reconstruct_finances','Reconstruct baseline 90-day cash flows, recurrence, exclusions and conservative forecast assumptions.'),
-        definition('apply_evidence_amendments','Apply explicit financial facts from retrieved messages. Types: remove, replace_recurring, add. Sources and exact quotes required.',
+        definition('apply_evidence_amendments','Apply explicit financial facts from retrieved messages. Sources and exact quotes required. remove requires target_event_id; replace_recurring requires target_event_id, amount and day; add requires amount, date and direction. Never resubmit an already-applied amendment. Missing decision-critical facts require finish_decision uncertainty, not guessed amendments.',
                    {'amendments':{'type':'array','items':{'type':'object','properties':{
                        'evidence_id':{'type':'string'},'quote':{'type':'string'},'operation':{'enum':['remove','replace_recurring','add']},
                        'target_event_id':{'type':'string'},'amount':{'type':'string'},'day':{'type':'integer','minimum':1,'maximum':31},
                        'date':{'type':'string'},'effective_date':{'type':'string'},'direction':{'enum':['debit','credit']},'category':{'type':'string'}},
                        'required':['evidence_id','quote','operation'],'additionalProperties':False}}},['amendments']),
         definition('evaluate_payment_plans','Evaluate unchanged plans first; if none safe, enumerate at most three permitted flexible changes. Return ranked winner and safety proof.'),
-        definition('finish_decision','Emit the ranked verified decision. Optional explanation must cite real evidence; uncertainty yields no-payment fallback.',
+        definition('finish_decision','Emit the ranked verified decision; omit explanation to use the tool-generated grounded disposition. Nonempty explanation must exactly match the tool-generated explanation. uncertainty is ONLY an unresolved decision-critical fact; routine forecast caveats and verified refusals are not uncertainty. Any nonempty uncertainty still yields no-payment fallback.',
                    {'explanation':{'type':'string'},'uncertainty':{'type':'string'}})]
 
     def __init__(self,repository,request,media):
@@ -102,6 +102,9 @@ class FinancialTools:
             if 'suggested_amount' in result:
                 self.resolved[event['event_id']]=result['suggested_amount']
             self.state=None; self.plans_checked=False
+            # Actual-pixel OCR already supplies unambiguous final/net evidence.
+            # Keep the native image handoff for ambiguous/missing OCR only.
+            if 'suggested_amount' in result:return dict(result)
             path=self.repository.dataset/'media'/'images'/(image['image_id']+'.png')
             return {**result,'_model_image':dict(type='image',source=dict(type='base64',media_type='image/png',
                                                   data=base64.b64encode(path.read_bytes()).decode('ascii')))}
@@ -190,7 +193,9 @@ class FinancialTools:
             if not self.evidence_read: raise ValueError('Retrieve evidence before finishing')
             if args.get('uncertainty'): return dict(row=self.fallback(args['uncertainty']))
             if not self.plans_checked: raise ValueError('Evaluate plans before finishing')
-            row=self.make_row(args.get('explanation',''))
+            row=self.make_row()
+            if args.get('explanation') and args['explanation']!=row['decision_explanation']:
+                raise ValueError('Omit explanation to use the tool-generated verified disposition; free-form financial claims cannot be verified')
             payments=validate_row(row,self.request)
             if self.best and not self.plan_ledger.verify(payments)['safe']: raise ValueError('Unsafe model output')
             return dict(row=row)

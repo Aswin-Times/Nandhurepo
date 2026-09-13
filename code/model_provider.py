@@ -209,7 +209,35 @@ class OpenRouterModel:
         except (ValueError,TypeError,KeyError,IndexError,AttributeError,InvalidOperation):
             raise ProviderError('OpenRouter returned an invalid response',usage) from None
 
+    def _safe_error(self,body):
+        """Only bounded error fields; never persist headers, request data or raw bodies."""
+        def clean(value):
+            if not isinstance(value,(str,int)):return ''
+            value=self._redact(str(value))
+            value=re.sub(r'(?i)bearer\s+\S+|sk-or-\S+|data:image/\S+', '[REDACTED]',value)
+            value=re.sub(r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}', '[REDACTED_EMAIL]',value)
+            value=re.sub(r'https?://\S+', '[REDACTED_URL]',value)
+            value=re.sub(r'\b\d{5,}\b','[REDACTED_NUMBER]',value)
+            return ' '.join(value.split())[:500]
+        try:
+            if len(body)>MAX_RATE_LIMIT_BODY_BYTES:return {}
+            data=json.loads(body,object_pairs_hook=strict_object,parse_constant=reject_constant)
+            error=data.get('error',{})
+            if not isinstance(error,dict):return {}
+            result={k:clean(error.get(v,'')) for k,v in
+                    (('provider_code','code'),('provider_type','type'),('provider_message','message'))}
+            raw=error.get('metadata',{}).get('raw') if isinstance(error.get('metadata'),dict) else None
+            if isinstance(raw,str):
+                try:nested=json.loads(raw).get('error',{})
+                except (ValueError,AttributeError,RecursionError):nested={}
+                if isinstance(nested,dict):
+                    if nested.get('message'):result['provider_message']+='; '+clean(nested['message'])
+                    if nested.get('type'):result['provider_type']=clean(nested['type'])
+            return result
+        except (ValueError,TypeError,AttributeError,UnicodeError,RecursionError):return {}
+
     def complete(self,system,messages,tools):
+        events=[]
         try:
             payload=dict(model=self.model,max_tokens=MAX_RESPONSE_TOKENS,temperature=0,stream=False,
                          messages=self._messages(system,messages),tool_choice='auto',
@@ -218,34 +246,65 @@ class OpenRouterModel:
             body=json.dumps(self._redact(payload),ensure_ascii=False).encode()
         except Exception:
             raise ProviderError('Invalid OpenRouter request configuration') from None
-        try:return self._complete_with_key(body,self._key)
+        try:return self._complete_with_key(body,self._key,events=events)
         except ProviderError as error:
+            error.http_events=list(events)
             if not self._fallback_key or not error.availability_failure:raise
             prior_attempts=error.usage.get('http_attempts',0)
         # Exactly one secondary phase; never mutate the primary or recurse.
-        return self._complete_with_key(body,self._fallback_key,prior_attempts)
+        try:return self._complete_with_key(body,self._fallback_key,prior_attempts,events)
+        except ProviderError as error:
+            error.http_events=list(events)
+            raise
 
-    def _complete_with_key(self,body,key,prior_attempts=0):
+    def _complete_with_key(self,body,key,prior_attempts=0,events=None):
+        events=[] if events is None else events
+        payload=json.loads(body)
+        modality='image' if any(p.get('type')=='image_url' for m in payload['messages']
+                     if isinstance(m.get('content'),list) for p in m['content']) else 'text_only'
         try:
             request=urllib.request.Request(self.base_url+'/chat/completions',data=body,
                         method='POST',headers={'Content-Type':'application/json','Authorization':'Bearer '+key})
         except Exception:
             raise ProviderError('Invalid OpenRouter request configuration') from None
         for attempt in range(1,MAX_HTTP_ATTEMPTS+1):
+            started=time.perf_counter()
+            event=dict(model=self.model,key_phase='primary' if key==self._key else 'fallback',
+                       attempt=attempt,status=None,modality=modality,elapsed_seconds=0,
+                       input_tokens=None,output_tokens=None,total_tokens=None,reported_cost_usd=None,
+                       failure_category=None)
             total_attempts=prior_attempts+attempt
             delay=2**(attempt-1)
             try:
                 with self._open(request,timeout=60) as response:
+                    event.update(status=getattr(response,'status',200),elapsed_seconds=time.perf_counter()-started)
+                    events.append(event)
                     try:data=json.load(response)
                     except (ValueError,UnicodeError):
                         raise ProviderError('OpenRouter returned invalid JSON',dict(http_attempts=total_attempts,usage_missing_calls=1)) from None
-                return self._normalize(data,total_attempts)
-            except ProviderError:raise
+                event['elapsed_seconds']=time.perf_counter()-started
+                try:
+                    measured=self._usage(data,total_attempts)
+                    for field in ('input_tokens','output_tokens','reported_cost_usd'):
+                        if field in measured:event[field]=measured[field]
+                    if event['input_tokens'] is not None:event['total_tokens']=event['input_tokens']+event['output_tokens']
+                except (ValueError,TypeError,AttributeError,InvalidOperation):pass
+                result=self._normalize(data,total_attempts)
+                result['http_events']=list(events)
+                return result
+            except ProviderError:
+                event['failure_category']='APPLICATION'
+                raise
             except urllib.error.HTTPError as error:
+                try:error_body=error.read(MAX_RATE_LIMIT_BODY_BYTES+1)
+                except Exception:error_body=b''
+                classification=classify_rate_limit(error_body) if error.code==429 else 'UNKNOWN'
+                event.update(status=error.code,elapsed_seconds=time.perf_counter()-started,
+                             failure_category=classification if error.code==429 else 'PROVIDER',
+                             **self._safe_error(error_body))
+                events.append(event)
                 if error.code==429:
-                    try:body=error.read(MAX_RATE_LIMIT_BODY_BYTES+1)
-                    except Exception:body=b''
-                    if classify_rate_limit(body)=='TERMINAL_KEY_QUOTA':
+                    if classification=='TERMINAL_KEY_QUOTA':
                         raise ProviderError('OpenRouter request failed with HTTP 429',
                                             dict(http_attempts=total_attempts,usage_missing_calls=1),
                                             availability_failure=True) from None
@@ -259,9 +318,13 @@ class OpenRouterModel:
                     if suggested>0:delay=max(delay,suggested)
                 except ValueError:pass
             except (urllib.error.URLError,TimeoutError,OSError):
+                event.update(elapsed_seconds=time.perf_counter()-started,failure_category='NETWORK')
+                events.append(event)
                 if attempt==MAX_HTTP_ATTEMPTS:
                     raise ProviderError('OpenRouter connection failed',dict(http_attempts=total_attempts,usage_missing_calls=1),availability_failure=True) from None
             except Exception:
+                event.update(elapsed_seconds=time.perf_counter()-started,failure_category='APPLICATION')
+                if event not in events:events.append(event)
                 raise ProviderError('OpenRouter transport failed',dict(http_attempts=total_attempts,usage_missing_calls=1)) from None
             self._sleep(delay)
         raise ProviderError('OpenRouter retries exhausted',availability_failure=True)

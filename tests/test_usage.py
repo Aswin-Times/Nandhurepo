@@ -12,6 +12,34 @@ class MockProvider:
         return dict(content=[],usage=dict(input_tokens=100,output_tokens=50))
 
 class UsageTests(unittest.TestCase):
+    def test_http_accounting_separates_recovery_and_unavailable_attempt_usage(self):
+        records=[dict(usage=dict(model_calls=1,input_tokens=100,output_tokens=20,http_attempts=2),
+            http_events=[dict(request_id='r',logical_call=1,key_phase='primary',status=429,
+                 input_tokens=None,output_tokens=None,total_tokens=None,reported_cost_usd=None),
+              dict(request_id='r',logical_call=1,key_phase='fallback',status=200,
+                 input_tokens=100,output_tokens=20,total_tokens=120,reported_cost_usd=0)])]
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'report.md'
+            result=write_usage_report(p,records,'openrouter','fixture',0,0,'fp','hash')
+            h=result['http_diagnostics']
+            self.assertEqual(h['attempts'],2)
+            self.assertEqual(h['statuses'],{'429':1,'200':1})
+            self.assertEqual(h['fallback_activations'],1)
+            self.assertEqual(h['fallback_recoveries'],1)
+            self.assertEqual(h['missing_attempt_usage'],1)
+            self.assertFalse(result['usage_complete'])
+            self.assertIn('total cost UNKNOWN',p.read_text())
+
+    def test_http_accounting_all_primary_successes_is_complete(self):
+        records=[dict(usage=dict(model_calls=1,input_tokens=100,output_tokens=20,http_attempts=1),
+            http_events=[dict(request_id='r',logical_call=1,key_phase='primary',status=200,
+                 input_tokens=100,output_tokens=20,total_tokens=120,reported_cost_usd=0)])]
+        with tempfile.TemporaryDirectory() as tmp:
+            result=write_usage_report(Path(tmp)/'report.md',records,'openrouter','fixture',0,0,'fp','hash')
+            self.assertTrue(result['usage_complete'])
+            self.assertEqual(result['http_diagnostics']['fallback_activations'],0)
+            self.assertEqual(result['http_diagnostics']['measured_total_tokens'],120)
+
     def test_budget_reserves_both_bounded_key_phases_before_network(self):
         provider=MockProvider();provider.max_http_attempts=6;provider.calls=0
         with self.assertRaises(RuntimeError):BudgetedModel(provider,0.02,1,1).complete('test',[],[])

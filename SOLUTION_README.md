@@ -3,15 +3,16 @@
 ## Current release status
 
 Current local model: `google/gemma-4-31b-it:free` on OpenRouter, using one primary key
-and one optional fallback key. The final 250-row hosted run is **pending**.
-The native-image smoke sent actual request_03 pixels, but received one primary daily-quota
-HTTP 429 and three fallback HTTP 429 responses. No model response or tool call occurred;
-native-image acceptance, tokens and cost remain unknown. Final root `output.csv` and
-`code.zip` have not been generated or verified.
+and one optional fallback key. The final 250-row production run generated 250 unique
+prediction rows, all safe no-payment provider-failure fallbacks: **0 accepted model decisions**.
+It made 259 logical calls and 1025 attempts (9 HTTP 200, 1015 HTTP 429, 1 network failure).
+Measured response tokens total 13365; unreported usage and total cost are UNKNOWN.
+Native-image acceptance and hosted accuracy remain unverified. The final usage report
+discloses these limitations; packaging does not override strict release certification.
 
 The local working-tree safety gate passed 147 tests, 250 pinned golden rows and 100 fresh
 independent plan checks, with 275 offline outputs unchanged. These are not hosted accuracy
-measurements. Pending engineering changes are separate from this documentation-only commit.
+measurements. The final release includes the previously tested engineering changes.
 Earlier label-exposed public-example scores are not a valid clean model benchmark.
 
 ## Setup
@@ -125,8 +126,9 @@ calling the production Ledger, which checks arithmetic but cannot prove source i
 `code.zip` contains `evaluation/usage_report.md` at the required root path, runnable code,
 tests and documentation. Dataset inputs and the transcript are separate artifacts. Packaging
 checks manifest/output/report correspondence and rejects unsupported providers, incomplete
-usage and the offline baseline. The final OpenRouter run remains pending because hosted
-provider availability is blocked; local credentials are configured. A pre-migration fresh checkout with a newly created
+usage and the offline baseline. The final OpenRouter run completed with rate-limit fallback
+rows; strict certification remains blocked, although local credentials are configured.
+A pre-migration fresh checkout with a newly created
 Python environment passed the contract suite and reproduced both the 25-row sample and 250-row
 full offline output hashes with cold OCR, with dependencies installed using this README.
 

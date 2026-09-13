@@ -1,0 +1,30 @@
+{
+  "provider": "openrouter",
+  "model": "google/gemma-4-31b-it:free",
+  "request_count": 250,
+  "fingerprint": "7d1613c89aa1bb04e79a72a7ea54b28faa2b46f64cd952d3d46cfc8509cb02da",
+  "config": {
+    "provider": "openrouter",
+    "model": "google/gemma-4-31b-it:free",
+    "samples": false,
+    "budget": 10,
+    "input_price": 0,
+    "output_price": 0,
+    "base_url": "https://openrouter.ai/api/v1"
+  },
+  "output_sha256": "cd11a5169a9c78af6c23556fc78d2c256f38a3ced8394519309d30fcb0175d4f",
+  "usage": {
+    "model_calls": 259,
+    "input_tokens": 13275,
+    "output_tokens": 90,
+    "http_attempts": 1025,
+    "usage_missing_calls": 250,
+    "cost_reported_calls": 9,
+    "reported_cost_usd": 0.0,
+    "budget_cost_usd": 0.0,
+    "models": {
+      "google/gemma-4-31b-it:free": 9
+    }
+  },
+  "fallback_rows": 250
+}

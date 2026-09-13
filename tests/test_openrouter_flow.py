@@ -181,7 +181,8 @@ class OpenRouterFlowTests(unittest.TestCase):
                 return context
         media=ImageEvidence(ROOT/'dataset')
         # Mock OCR inference only; real PNG reading/hash/media/tool/adaptor code runs.
-        media._engine=Mock(return_value=([([[0,0],[100,0],[100,20],[0,20]],'Amount due 100',1.0)],None))
+        media._engine=Mock(return_value=([([[0,0],[100,0],[100,20],[0,20]],'Amount due 100',1.0),
+            ([[0,30],[100,30],[100,50],[0,50]],'Amount due 120',1.0)],None))
         steps=[('retrieve_evidence',{}),('inspect_image',{'image_id':'image_01'}),
                ('resolve_image_amount',{'image_id':'image_01','amount':'100','quote':'Amount due 100'}),
                ('reconstruct_finances',{}),('evaluate_payment_plans',{}),('finish_decision',{})]
@@ -195,6 +196,28 @@ class OpenRouterFlowTests(unittest.TestCase):
         self.assertEqual(wire['messages'][-1]['role'],'user')
         self.assertTrue(wire['messages'][-1]['content'][-1]['image_url']['url'].startswith('data:image/png;base64,'))
         self.assertNotIn('_model_image',json.dumps(result['trace']))
+        media._engine.assert_called_once()
+
+    def test_unambiguous_image_uses_real_pixel_ocr_without_redundant_vision_payload(self):
+        from test_tools import FakeRepository,REQ
+        from test_reconstruction import event
+        from evidence_media import ImageEvidence
+        class Repository(FakeRepository):
+            dataset=ROOT/'dataset'
+            def context(self,request):
+                context=super().context(request)
+                context['events']=[event('bill','2026-01-02','',status='pending')]
+                context['images']=[dict(image_id='image_01',related_event_id='bill')]
+                return context
+        media=ImageEvidence(ROOT/'dataset')
+        media._engine=Mock(return_value=([([[0,0],[100,0],[100,20],[0,20]],'Amount due 100',1.0)],None))
+        tools=FinancialTools(Repository(),REQ,media)
+        result=tools.dispatch('inspect_image',{'image_id':'image_01'})
+        self.assertEqual(result['suggested_amount'],'100')
+        self.assertEqual(tools.resolved,{'bill':'100'})
+        self.assertEqual(result['lines'],['Amount due 100'])
+        self.assertTrue(result['sha256'])
+        self.assertFalse('_model_image' in result,'Unambiguous OCR must not attach redundant image bytes')
         media._engine.assert_called_once()
 
     def test_model_disabled_ablation_changes_anchored_financial_effect(self):
@@ -252,8 +275,9 @@ class OpenRouterFlowTests(unittest.TestCase):
                 self.assertEqual(payload['model'],ENV['OPENROUTER_MODEL'])
                 name=('retrieve_evidence','reconstruct_finances','evaluate_payment_plans','finish_decision')[turn%4]
                 turn+=1
-                args=json.dumps({'explanation':SENTINEL}) if name=='finish_decision' else '{}'
-                return wire_response(completion(name,args))
+                data=completion(name,'{}')
+                data['choices'][0]['message']['content']=SENTINEL
+                return wire_response(data)
             opener=Mock(side_effect=transport)
             with patch.dict(os.environ,ENV,clear=True):model=OpenRouterModel(opener=opener,sleeper=Mock())
             out=root/'output.csv';checkpoint=root/'checkpoint.jsonl';report_path=root/'usage.md'

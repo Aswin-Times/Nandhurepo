@@ -16,6 +16,7 @@ def run_agent_loop(model, tools, request, fallback, max_steps=MAX_AGENT_STEPS):
     messages=[dict(role='user',content='<input trust="untrusted">'+json.dumps(request_input(request),ensure_ascii=False)+'</input>')]
     usage=dict(input_tokens=0,output_tokens=0,model_calls=0)
     trace=[]
+    http_events=[]
     finish_failures=0
     for step in range(max_steps):
         try:
@@ -23,9 +24,13 @@ def run_agent_loop(model, tools, request, fallback, max_steps=MAX_AGENT_STEPS):
         except Exception as error:
             # Provider exceptions can contain sensitive HTTP details; never persist them.
             failed=getattr(error,'usage',{})
+            http_events.extend(dict(e,request_id=request['request_id'],logical_call=step+1)
+                               for e in getattr(error,'http_events',[]))
             if failed.get('http_attempts'):
                 usage=aggregate_usage([{'usage':usage},{'usage':dict(failed,model_calls=1)}])
-            return dict(row=fallback('model provider unavailable; evidence insufficient'),usage=usage,trace=trace)
+            return dict(row=fallback('model provider unavailable; evidence insufficient'),usage=usage,trace=trace,http_events=http_events)
+        http_events.extend(dict(e,request_id=request['request_id'],logical_call=step+1)
+                           for e in response.get('http_events',[]))
         current=dict(response.get('usage',{}),model_calls=1)
         if response.get('model'):current['models']={response['model']:1}
         usage=aggregate_usage([{'usage':usage},{'usage':current}])
@@ -59,8 +64,8 @@ def run_agent_loop(model, tools, request, fallback, max_steps=MAX_AGENT_STEPS):
             if 'row' in result:
                 finished=result['row']
         if finished is not None:
-            return dict(row=finished,usage=usage,trace=trace)
+            return dict(row=finished,usage=usage,trace=trace,http_events=http_events)
         if finish_failures>=2:
-            return dict(row=fallback('output validation failed after one repair; evidence insufficient'),usage=usage,trace=trace)
+            return dict(row=fallback('output validation failed after one repair; evidence insufficient'),usage=usage,trace=trace,http_events=http_events)
         messages.append(dict(role='user',content=results))
-    return dict(row=fallback('agent step cap reached; evidence insufficient'),usage=usage,trace=trace)
+    return dict(row=fallback('agent step cap reached; evidence insufficient'),usage=usage,trace=trace,http_events=http_events)

@@ -69,6 +69,70 @@ class ToolsTests(unittest.TestCase):
             tools.dispatch('apply_evidence_amendments',{'amendments':[dict(evidence_id='m',
                 quote='Salary USD 100 confirmed for 2026-01-05.',operation='add',amount='100',
                 date='2026-01-03',direction='credit',category='salary')]})
+class FinishReleaseTests(unittest.TestCase):
+    def prepared(self,amount='350'):
+        tools=FinancialTools(FakeRepository(),dict(REQ,requested_amount=amount),None)
+        for name in ('retrieve_evidence','reconstruct_finances','evaluate_payment_plans'):
+            tools.dispatch(name,{})
+        return tools
+
+    def test_finish_protocol_distinguishes_blockers_from_routine_caveats(self):
+        from agent_prompts import SYSTEM_PROMPT
+        description=next(t for t in FinancialTools.definitions if t['name']=='finish_decision')['description']
+        for phrase in ('materially change','forecast assumptions','unconfirmed income','childcare'):
+            self.assertIn(phrase,SYSTEM_PROMPT)
+        self.assertIn('unresolved decision-critical fact',description)
+        self.assertIn('omit explanation',description)
+        self.assertIn('abstain immediately with finish_decision',SYSTEM_PROMPT)
+        self.assertIn('Do not resubmit an already-applied amendment',SYSTEM_PROMPT)
+
+    def test_genuine_missing_fact_remains_abstention(self):
+        t=self.prepared()
+        row=t.dispatch('finish_decision',{'uncertainty':'Required childcare amount is missing'})['row']
+        self.assertEqual(row['amount_safe_to_pay'],'0')
+        self.assertEqual(row['recommended_payment_method'],'not_recommended')
+        self.assertIn('childcare',row['decision_explanation'])
+
+    def test_truthy_uncertainty_is_never_mechanically_cleared(self):
+        for caveat in ('None beyond forecast assumptions','Unconfirmed bonus excluded','Recheck finances'):
+            row=self.prepared().dispatch('finish_decision',{'uncertainty':caveat})['row']
+            self.assertEqual(row['amount_safe_to_pay'],'0')
+            self.assertIn('insufficient evidence',row['decision_explanation'])
+
+    def test_empty_uncertainty_uses_existing_verified_explanation(self):
+        t=self.prepared();expected=t.make_row()
+        self.assertEqual(t.dispatch('finish_decision',{'uncertainty':''})['row'],expected)
+        self.assertEqual(expected['recommended_payment_method'],'full_payment')
+
+    def test_contradictory_model_narratives_are_rejected_not_accepted(self):
+        for narrative in ('Pay in full immediately despite minimum balance',
+                          'Use partial payments even though only full payment is allowed',
+                          'Wait; a safe payment will become available without evidence'):
+            t=self.prepared('700')
+            with self.assertRaisesRegex(ValueError,'tool-generated'):
+                t.dispatch('finish_decision',{'explanation':narrative,'uncertainty':''})
+            row=t.dispatch('finish_decision',{})['row']
+            self.assertEqual(row['recommended_payment_method'],'not_recommended')
+            self.assertEqual(row['payment_plan'],'none')
+
+    def test_exact_verified_explanation_can_still_be_supplied(self):
+        t=self.prepared();expected=t.make_row()
+        self.assertEqual(t.dispatch('finish_decision',{'explanation':expected['decision_explanation']})['row'],expected)
+
+    def test_unsafe_immediate_narrative_cannot_override_verified_wait(self):
+        t=self.prepared()
+        t.state=FinancialState(Ledger(REQ['request_date'],D('600'),D('200'),[
+            CashFlow('2026-01-02',D('-300'),'essential'),
+            CashFlow('2026-01-05',D('500'),'confirmed_salary')]),[],[],[])
+        t.dispatch('evaluate_payment_plans',{})
+        self.assertEqual(t.best['method'],'wait')
+        with self.assertRaises(ValueError):
+            t.dispatch('finish_decision',{'explanation':'Pay in full today','uncertainty':''})
+        row=t.dispatch('finish_decision',{})['row']
+        self.assertEqual(row['recommended_payment_method'],'wait')
+        self.assertEqual(row['payment_plan'],'2026-01-05:350')
+        self.assertTrue(t.plan_ledger.verify(validate_row(row,t.request))['safe'])
+
 class AmendmentTransactionTests(unittest.TestCase):
     def setUp(self):
         from test_reconstruction import event

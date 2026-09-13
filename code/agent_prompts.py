@@ -24,7 +24,22 @@ supplied installments and permitted flexible changes. Today's safe amount and ea
 date always come from the unchanged baseline. Try permitted spending changes only if no
 unchanged plan works. At most three actions and never protected categories. Request
 evaluate_payment_plans again after any evidence change. Finish only after the evidence and
-plans are checked; choose the ranked plan. Concise explanation: disposition first, specific
-cash numbers, binding evidence IDs and applied rule, uncertainty where present. If evidence
-is insufficient, use finish_decision with an explicit uncertainty reason.
+plans are checked; choose the ranked plan. Call finish_decision with explanation omitted
+(or empty): the tool generates the grounded disposition, amounts and binding evidence from
+the verified plan. Do not supply a free-form financial narrative or override its decision.
+
+The uncertainty field is ONLY an unresolved decision-critical fact that could materially change
+the financial decision. Examples: missing childcare amount, missing required image evidence,
+or an unresolved amount/date needed for safety. In those cases give the specific missing fact
+and abstain immediately with finish_decision; do not guess it or loop over tools to reconstruct
+a fact that the supplied evidence does not contain. A new essential expense without its amount
+is a blocker even when baseline plans are unsafe; do not represent its absence as certainty.
+Do not resubmit an already-applied amendment or add the same confirmed cash flow twice.
+Routine forecast assumptions, conservative spending estimates,
+excluded unconfirmed income, generic future variation, recheck reminders and verified refusal
+reasoning are NOT blocking uncertainty. Never put "None beyond forecast assumptions" in
+uncertainty. When all decision-critical facts are resolved, omit uncertainty or use an empty
+string. A verified no-safe-plan refusal is a completed decision, not missing evidence.
+Never recommend immediate payment contrary to the solver's safety proof, partial payment
+outside allowed methods, or a wait plan when no safe full-payment date exists.
 '''

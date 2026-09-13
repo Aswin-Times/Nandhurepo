@@ -15,14 +15,17 @@ OpenRouter is the only hosted provider; the current local model is
 
 The latest local gate passed **147/147 tests**, **250/250 golden reproduction**, and
 **100/100 independent plan checks**; all **275 offline outputs remained unchanged**.
-These are regression checks, not hosted accuracy. Pending engineering changes are separate
-from this documentation-only commit.
+These are regression checks, not hosted accuracy. The final release includes the previously
+tested engineering changes and the actual production-run report.
 
-**Release blocked:** request_03's native-image smoke received four HTTP 429 responses
-(one primary daily-quota failure, three fallback provider-rate-limit failures). No model
-response or tool call occurred. Image acceptance, tokens and cost remain unknown.
-The final 250-row hosted run has not started; final root `output.csv` and `code.zip`
-have not been generated or verified. The offline baseline is not the final AI submission.
+The actual final 250-row production run has now generated root `output.csv`: 250 unique
+evaluation IDs, all explicit no-payment provider-failure fallback rows, **0 accepted model
+decisions**. It made 259 logical calls and 1025 HTTP/network attempts (9 HTTP 200, 1015 HTTP
+429, 1 network failure). All 250 terminal outcomes were rate limits. Measured tokens total
+13365; total cost and unreported usage remain UNKNOWN. See
+[the final usage report](./code/evaluation/usage_report.md) for reconciliation and limitations.
+Native-image acceptance and hosted accuracy remain unverified. Artifact coverage is not
+model success; strict release certification remains blocked by fallbacks/incomplete usage.
 
 Starter repository for the **HackerRank Orchestrate** 24-hour hackathon (September 2026).
 

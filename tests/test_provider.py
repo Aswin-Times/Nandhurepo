@@ -390,7 +390,7 @@ class TerminalRateLimitTests(unittest.TestCase):
                     opener=Mock(side_effect=errors+[wire_response(completion())])
                     self.make_model(opener).complete('system',[],[])
                     self.assert_phases(opener,len(errors),1)
-                for e in errors:e.fp.read.assert_not_called()
+                for e in errors:e.fp.read.assert_called_once_with(16385)
 
     def test_tool_and_application_failures_never_trigger_fallback(self):
         opener=Mock(return_value=wire_response(completion('read','{broken')))
@@ -472,5 +472,89 @@ class TerminalRateLimitTests(unittest.TestCase):
             for key in (SENTINEL,self.secondary):self.assertNotIn(key,rendered)
         else:self.fail('Terminal quota unexpectedly succeeded')
         self.assert_phases(opener,1,1)
+
+class ReleaseDiagnosticsTests(unittest.TestCase):
+    secondary=KeyFallbackTests.secondary
+    make_model=KeyFallbackTests.make_model
+    assert_phases=KeyFallbackTests.assert_phases
+    quota_error=TerminalRateLimitTests.quota_error
+    daily=TerminalRateLimitTests.daily
+
+    def test_primary_success_has_measured_attempt_usage_without_credentials(self):
+        result=self.make_model(Mock(return_value=wire_response(completion()))).complete('system',[],[])
+        events=result['http_events'];self.assertEqual(len(events),1)
+        e=events[0]
+        self.assertEqual((e['key_phase'],e['status'],e['attempt'],e['modality']),('primary',200,1,'text_only'))
+        self.assertEqual((e['input_tokens'],e['output_tokens'],e['total_tokens']),(100,20,120))
+        self.assertEqual(e['reported_cost_usd'],0.003)
+        self.assertGreaterEqual(e['elapsed_seconds'],0)
+        self.assertNotIn(SENTINEL,json.dumps(events))
+
+    def test_terminal_primary_then_fallback_events_and_bytes(self):
+        opener=Mock(side_effect=[self.quota_error(),wire_response(completion())])
+        result=self.make_model(opener).complete('system',[],[]);self.assert_phases(opener,1,1)
+        events=result['http_events']
+        self.assertEqual([e['status'] for e in events],[429,200])
+        self.assertEqual([e['key_phase'] for e in events],['primary','fallback'])
+        self.assertEqual(events[0]['failure_category'],'TERMINAL_KEY_QUOTA')
+        self.assertIsNone(events[0]['input_tokens'])
+
+    def test_image_400_safe_nested_error_is_available_no_fallback(self):
+        data={'error':{'code':400,'message':'Provider returned error',
+              'metadata':{'raw':json.dumps({'error':{'type':'invalid_request_error',
+                   'message':'Image content is unsupported '+SENTINEL+' '+self.secondary+' person@example.com'}})}}}
+        opener=Mock(side_effect=self.quota_error(status=400,raw=json.dumps(data).encode()))
+        image=dict(type='image',source=dict(type='base64',media_type='image/png',data='opaque-pixels'))
+        with self.assertRaises(ProviderError) as caught:
+            self.make_model(opener).complete('system',[dict(role='user',content=[image])],[])
+        self.assert_phases(opener,1,0)
+        e=caught.exception.http_events[0]
+        self.assertEqual((e['status'],e['modality']),(400,'image'))
+        self.assertIn('unsupported',e['provider_message'])
+        rendered=json.dumps(e)
+        for value in (SENTINEL,self.secondary,'person@example.com','opaque-pixels'):
+            self.assertNotIn(value,rendered)
+        self.assertNotIn('Authorization',rendered)
+
+    def test_transient_retry_diagnostics_preserve_policy(self):
+        opener=Mock(side_effect=[self.quota_error('Too many requests'),wire_response(completion())]);sleeper=Mock()
+        result=self.make_model(opener,sleeper=sleeper).complete('system',[],[])
+        self.assert_phases(opener,2,0);sleeper.assert_called_once_with(1)
+        self.assertEqual([e['status'] for e in result['http_events']],[429,200])
+
+    def test_network_failure_diagnostics_have_no_exception_text(self):
+        opener=Mock(side_effect=urllib.error.URLError(SENTINEL+' person@example.com'))
+        with self.assertRaises(ProviderError) as caught:self.make_model(opener).complete('system',[],[])
+        self.assert_phases(opener,3,3)
+        events=caught.exception.http_events
+        self.assertEqual(len(events),6)
+        self.assertTrue(all(e['failure_category']=='NETWORK' for e in events))
+        self.assertNotIn(SENTINEL,json.dumps(events))
+        self.assertNotIn('person@example.com',json.dumps(events))
+
+    def test_invalid_200_response_keeps_status_and_available_usage(self):
+        data=completion();data['choices']=[]
+        with self.assertRaises(ProviderError) as caught:
+            self.make_model(Mock(return_value=wire_response(data))).complete('system',[],[])
+        e=caught.exception.http_events[0]
+        self.assertEqual(e['status'],200)
+        self.assertEqual(e['input_tokens'],100)
+        self.assertEqual(e['failure_category'],'APPLICATION')
+
+    def test_agent_preserves_events_on_success_and_failure(self):
+        from financial_agent import run_agent_loop
+        from financial_tools import FinancialTools
+        from test_tools import FakeRepository,REQ
+        steps=['retrieve_evidence','reconstruct_finances','evaluate_payment_plans','finish_decision']
+        opener=Mock(side_effect=[wire_response(completion(name)) for name in steps])
+        tools=FinancialTools(FakeRepository(),REQ,None)
+        result=run_agent_loop(self.make_model(opener),tools,REQ,tools.fallback)
+        self.assertEqual(len(result['http_events']),4)
+        self.assertTrue(all(e['request_id']==REQ['request_id'] for e in result['http_events']))
+        opener=Mock(side_effect=[self.quota_error(),self.quota_error()])
+        tools=FinancialTools(FakeRepository(),REQ,None)
+        result=run_agent_loop(self.make_model(opener),tools,REQ,tools.fallback)
+        self.assertEqual([e['status'] for e in result['http_events']],[429,429])
+        self.assertEqual(result['usage']['http_attempts'],2)
 
 if __name__=='__main__':unittest.main()
