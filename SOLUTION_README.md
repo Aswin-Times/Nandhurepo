@@ -1,5 +1,21 @@
 # Buy or Wait? — evidence investigation with verified financial plans
 
+## Current release status
+
+Current local model: `google/gemma-4-31b-it:free` on OpenRouter, using one primary key
+and one optional fallback key. The final 250-row hosted run is **pending**.
+The native-image smoke sent actual request_03 pixels, but received one primary daily-quota
+HTTP 429 and three fallback HTTP 429 responses. No model response or tool call occurred;
+native-image acceptance, tokens and cost remain unknown. Final root `output.csv` and
+`code.zip` have not been generated or verified.
+
+The local working-tree safety gate passed 147 tests, 250 pinned golden rows and 100 fresh
+independent plan checks, with 275 offline outputs unchanged. These are not hosted accuracy
+measurements. Pending engineering changes are separate from this documentation-only commit.
+Earlier label-exposed public-example scores are not a valid clean model benchmark.
+
+## Setup
+
 Python 3.12 or newer is required. Place the supplied participant `dataset/` directory
 beside `code/`; leave those inputs unchanged. No live banking, exchange rates, market data,
 or organizer files are read. Install pixel OCR and run the contract tests:
@@ -109,8 +125,8 @@ calling the production Ledger, which checks arithmetic but cannot prove source i
 `code.zip` contains `evaluation/usage_report.md` at the required root path, runnable code,
 tests and documentation. Dataset inputs and the transcript are separate artifacts. Packaging
 checks manifest/output/report correspondence and rejects unsupported providers, incomplete
-usage and the offline baseline. The final OpenRouter run remains pending while credentials
-are absent. A pre-migration fresh checkout with a newly created
+usage and the offline baseline. The final OpenRouter run remains pending because hosted
+provider availability is blocked; local credentials are configured. A pre-migration fresh checkout with a newly created
 Python environment passed the contract suite and reproduced both the 25-row sample and 250-row
 full offline output hashes with cold OCR, with dependencies installed using this README.
 
@@ -121,4 +137,5 @@ checks pixel extraction. Any hash change requires a measured cause recorded in E
 Migration inventory, baseline and verification scope are in MIGRATION.md. The post-migration
 suite includes end-to-end synthetic ZIP packaging, provider mutation negative controls and
 model-disabled evidence ablation. Mocked token/cost fixtures are not real provider usage;
-public hosted accuracy and a live smoke remain unmeasured without environment configuration.
+final 250-row hosted accuracy remains unmeasured. A successful earlier-model text smoke
+does not establish native-image compatibility or availability for the currently configured model.

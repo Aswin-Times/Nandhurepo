@@ -6,6 +6,24 @@ the executable contract and [EXPERIMENTS.md](./EXPERIMENTS.md) for measured deci
 Hosted inference now uses OpenRouter (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`);
 see [MIGRATION.md](./MIGRATION.md) for the dependency inventory and verification scope.
 
+## Current release status
+
+The agent uses native tools to investigate evidence and deterministic validators to check
+conservative 90-day financial plans. Public expected answers stay evaluator-only.
+OpenRouter is the only hosted provider; the current local model is
+`google/gemma-4-31b-it:free`, with one primary and one optional fallback key, no model routing.
+
+The latest local gate passed **147/147 tests**, **250/250 golden reproduction**, and
+**100/100 independent plan checks**; all **275 offline outputs remained unchanged**.
+These are regression checks, not hosted accuracy. Pending engineering changes are separate
+from this documentation-only commit.
+
+**Release blocked:** request_03's native-image smoke received four HTTP 429 responses
+(one primary daily-quota failure, three fallback provider-rate-limit failures). No model
+response or tool call occurred. Image acceptance, tokens and cost remain unknown.
+The final 250-row hosted run has not started; final root `output.csv` and `code.zip`
+have not been generated or verified. The offline baseline is not the final AI submission.
+
 Starter repository for the **HackerRank Orchestrate** 24-hour hackathon (September 2026).
 
 ## Buy or Wait?
@@ -29,11 +47,16 @@ Read [`problem_statement.md`](./problem_statement.md) for the full task spec, in
 Clone the repository and move into the project directory:
 
 ```bash
-git clone https://github.com/interviewstreet/hackerrank-orchestrate-september26.git
-cd hackerrank-orchestrate-september26
+git clone https://github.com/Aswin-Times/hacker-rank-orchestrate.git
+cd hacker-rank-orchestrate
 ```
 
-Build your solution in `code/main.py`, or use another language and document its entry point clearly.
+Install dependencies and test before running the terminal entry point `code/main.py`:
+
+```bash
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+```
 
 Your solution must:
 
