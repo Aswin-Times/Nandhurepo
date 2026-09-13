@@ -186,3 +186,42 @@ checks pass; local .env, transcript and retry evidence remain ignored.
 
 Decision remains TUNE OPENROUTER, gated on a responsive endpoint and an explicitly chosen
 image-capable model. This failed retry provides no accuracy evidence for a different verdict.
+
+## OR-LIVE-03 — configured vision-model preflight (2026-09-13)
+
+Starting commit 3c689d2. Required key/model settings detected without exposing the key.
+User-configured model: `qwen/qwen2.5-vl-32b-instruct:free`. Configuration was not changed
+by the agent. Financial logic, prompts and finish-tool schema remain unchanged.
+
+Before inference, reviewed the existing adapter and experiment driver. The configured
+base matches https://openrouter.ai/api/v1; completions use /chat/completions, POST JSON,
+Bearer authorization, native function parameters/tool_calls/tool_call_id and preserved
+reasoning continuation. Contract/integration checks pass (15 provider, eight flow tests).
+Effective urllib proxy configuration is absent. The previous 183.735-second failure is
+consistent with three 60-second timeout attempts plus 1/2-second backoff; its redacted
+historical error does not distinguish timeout from every other connectivity failure.
+No clear payload/transport implementation defect was established, so no speculative fix.
+
+VERIFIED: current public model catalog returned HTTP 200. Neither the exact configured
+identifier nor its non-free base identifier is listed. The existing first-call driver
+correctly refused it before sending inference. A second public read-only catalog query
+confirmed absence and recorded model capabilities in ignored live-retry02-preflight.json.
+Failure category: invalid model / unavailable catalog identifier. This is not a new
+connection timeout, authentication test or evidence that hosted billing is resolved.
+
+Inference HTTP attempts: zero. No smoke response, tool calls, structured decision,
+returned model identity or model token/cost measurement exists for this configuration.
+No 25-row run, finish-tool change, model substitution or full 250-row hosted run occurred.
+The catalog currently lists free image-and-tool candidates including
+google/gemma-4-31b-it:free and google/gemma-4-26b-a4b-it:free. Advertised capability is
+not live acceptance, responsiveness or financial accuracy evidence. User selection is
+required before a new fixed-model smoke. Source: https://openrouter.ai/api/v1/models;
+tool format reference: https://openrouter.ai/docs/guides/features/tool-calling;
+image format reference: https://openrouter.ai/docs/guides/overview/multimodal/image-understanding.
+
+Decision: SMOKE_FAILED — DIAGNOSE PROVIDER. The blocker is specifically the unavailable
+configured identifier; no blind inference retry is warranted. Financial logic, finish
+ambiguity and previous results remain untouched. Final local regression: 75 tests,
+all 14 isolated files, unchanged 250-row golden and 100 independent plan replays pass;
+secret/report checks pass, offline release still correctly refused. No submission-ready
+claim is made and the required final hosted usage artifact remains pending.
