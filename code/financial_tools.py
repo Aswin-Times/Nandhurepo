@@ -5,6 +5,8 @@ import base64
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal as D
+from decimal import InvalidOperation
+from copy import deepcopy
 from financial_ledger import Ledger, choose_plan, money, amount_text
 from financial_reconstruction import reconstruct
 
@@ -122,8 +124,9 @@ class FinancialTools:
                                         recurring_id=f.recurring_id,category=f.category) for f in self.state.ledger.flows],
                         baseline_safety=self.state.ledger.verify([]))
         if name=='apply_evidence_amendments':
+            proposed=self.proposed_amendments(args)
             sources={m['message_id']:m for m in self.context['messages']}
-            for amendment in args['amendments']:
+            for amendment in proposed[len(self.amendments):]:
                 source=sources.get(amendment['evidence_id'])
                 if not source or not amendment['quote'] or amendment['quote'] not in source['message_text']:
                     raise ValueError('Financial amendment requires exact quote from real linked message')
@@ -150,7 +153,14 @@ class FinancialTools:
                 if amendment.get('target_event_id') and self.state is not None:
                     if amendment['target_event_id'] not in {r['event_id'] for r in self.state.recurring}|{e['event_id'] for e in self.context['events']}:
                         raise ValueError('Unknown evidence amendment target')
-            self.amendments.extend(args['amendments']);self.state=None;self.plans_checked=False
+            # Dry-run the complete batch on a fresh reconstruction. Never let an
+            # invalid target/item poison the persistent amendment list or ledger.
+            try:
+                reconstruct(self.request['request_date'],self.context['profile'],self.context['events'],
+                            self.context['messages'],self.repository.rates,self.resolved,proposed)
+            except (KeyError,TypeError,InvalidOperation):
+                raise ValueError('Proposed amendments cannot reconstruct a valid financial state') from None
+            self.amendments=proposed;self.state=None;self.plans_checked=False
             return dict(applied=len(args['amendments']),next_step='reconstruct_finances')
         if name=='evaluate_payment_plans':
             if self.state is None: raise ValueError('Reconstruct finances first')
@@ -185,6 +195,51 @@ class FinancialTools:
             if self.best and not self.plan_ledger.verify(payments)['safe']: raise ValueError('Unsafe model output')
             return dict(row=row)
         raise ValueError('Unknown financial tool: '+name)
+
+    def proposed_amendments(self,args):
+        """Check operation-specific inputs without touching request state."""
+        if not isinstance(args,dict) or set(args)!={'amendments'} or not isinstance(args['amendments'],list):
+            raise ValueError('Expected an amendments array and no other fields')
+        schema=next(t for t in self.definitions if t['name']=='apply_evidence_amendments')['input_schema']
+        fields=schema['properties']['amendments']['items']['properties']
+        required={'remove':('target_event_id',),
+                  'replace_recurring':('target_event_id','amount','day'),
+                  'add':('amount','date','direction')}
+        incoming=deepcopy(args['amendments'])
+        for amendment in incoming:
+            if not isinstance(amendment,dict) or set(amendment)-set(fields):
+                raise ValueError('Amendment must contain only supported fields')
+            for field,value in amendment.items():
+                if field=='day':
+                    if type(value)!=int or not 1<=value<=31:
+                        raise ValueError('Amendment day must be an integer from 1 to 31')
+                elif not isinstance(value,str):
+                    raise ValueError('Amendment '+field+' must be a string')
+            operation=amendment.get('operation')
+            if operation not in required:
+                raise ValueError('Unsupported evidence amendment operation')
+            for field in ('evidence_id','quote','operation')+required[operation]:
+                if field not in amendment or amendment[field]=='':
+                    raise ValueError('Amendment '+operation+' requires '+field)
+            if 'direction' in amendment and amendment['direction'] not in {'debit','credit'}:
+                raise ValueError('Amendment direction must be debit or credit')
+            if 'amount' in amendment:
+                try:amount=money(amendment['amount'])
+                except (InvalidOperation,ValueError):
+                    raise ValueError('Amendment amount must be finite positive money') from None
+                if amount<=0:raise ValueError('Evidence cash amount must be positive')
+            for field in ('date','effective_date'):
+                if field in amendment:
+                    value=amendment[field]
+                    try:valid=date.fromisoformat(value).isoformat()==value
+                    except ValueError:valid=False
+                    if not valid:raise ValueError('Amendment '+field+' must be a valid YYYY-MM-DD date')
+            target=amendment.get('target_event_id')
+            if operation in {'remove','replace_recurring'}:
+                known={e['event_id'] for e in self.context['events']}
+                if self.state is not None:known.update(r['event_id'] for r in self.state.recurring)
+                if target not in known:raise ValueError('Unknown evidence amendment target')
+        return deepcopy(self.amendments)+incoming
 
     def change_variants(self):
         p=self.context['profile']
