@@ -307,4 +307,170 @@ class KeyFallbackTests(unittest.TestCase):
         self.make_model(opener,sleeper=sleeper).complete('system',[],[])
         self.assert_phases(opener,1,1);sleeper.assert_not_called()
 
+class TerminalRateLimitTests(unittest.TestCase):
+    secondary=KeyFallbackTests.secondary
+    make_model=KeyFallbackTests.make_model
+    assert_phases=KeyFallbackTests.assert_phases
+    daily='Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day'
+
+    def quota_error(self,message=None,status=429,raw=None,headers=None):
+        body=raw if raw is not None else json.dumps({'error':{'code':status,'message':message or self.daily}}).encode()
+        return urllib.error.HTTPError('https://redacted',status,'fixture',headers or {},io.BytesIO(body))
+
+    def test_terminal_single_key_stops_after_one_attempt(self):
+        opener=Mock(side_effect=self.quota_error());sleeper=Mock()
+        with self.assertRaises(ProviderError) as caught:
+            self.make_model(opener,secondary='',sleeper=sleeper).complete('system',[],[])
+        self.assert_phases(opener,1,0);sleeper.assert_not_called()
+        self.assertTrue(caught.exception.availability_failure)
+        self.assertEqual(caught.exception.usage['http_attempts'],1)
+
+    def test_terminal_primary_returns_fallback_response_same_payload(self):
+        opener=Mock(side_effect=[self.quota_error(),wire_response(completion())]);sleeper=Mock()
+        result=self.make_model(opener,sleeper=sleeper).complete('system',[dict(role='user',content='evidence')],[TOOL])
+        self.assert_phases(opener,1,1);sleeper.assert_not_called()
+        self.assertEqual(result['usage']['http_attempts'],2)
+        self.assertEqual(result['content'][0]['text'],'result')
+
+    def test_both_terminal_stops_each_key_once_with_existing_failure(self):
+        opener=Mock(side_effect=[self.quota_error(),self.quota_error()]);sleeper=Mock()
+        with self.assertRaises(ProviderError) as caught:
+            self.make_model(opener,sleeper=sleeper).complete('system',[],[])
+        self.assert_phases(opener,1,1);sleeper.assert_not_called()
+        self.assertEqual(str(caught.exception),'OpenRouter request failed with HTTP 429')
+        self.assertEqual(caught.exception.usage,dict(http_attempts=2,usage_missing_calls=1))
+
+    def test_terminal_primary_preserves_transient_fallback_retries(self):
+        opener=Mock(side_effect=[self.quota_error(),self.quota_error('Too many requests'),wire_response(completion())]);sleeper=Mock()
+        result=self.make_model(opener,sleeper=sleeper).complete('system',[],[])
+        self.assert_phases(opener,1,2)
+        self.assertEqual(result['usage']['http_attempts'],3)
+        self.assertEqual([c.args[0] for c in sleeper.call_args_list],[1])
+
+    def test_transient_primary_then_terminal_fallback(self):
+        opener=Mock(side_effect=[self.quota_error('Too many requests') for _ in range(3)]+[self.quota_error()]);sleeper=Mock()
+        with self.assertRaises(ProviderError):self.make_model(opener,sleeper=sleeper).complete('system',[],[])
+        self.assert_phases(opener,3,1)
+        self.assertEqual([c.args[0] for c in sleeper.call_args_list],[1,2])
+
+    def test_transient_primary_retry_after_then_success_no_fallback(self):
+        opener=Mock(side_effect=[self.quota_error('Rate limit exceeded',headers={'Retry-After':'3'}),wire_response(completion())]);sleeper=Mock()
+        result=self.make_model(opener,sleeper=sleeper).complete('system',[],[])
+        self.assert_phases(opener,2,0)
+        self.assertEqual([c.args[0] for c in sleeper.call_args_list],[3])
+        self.assertEqual(result['usage']['http_attempts'],2)
+
+    def test_ambiguous_malformed_and_unrelated_bodies_preserve_retries(self):
+        bodies=[b'not JSON',b'{"error":',b'[]',b'{"error":{"message":null}}',
+                b'{"message":"Daily quota exhausted"}']
+        bodies.extend(json.dumps({'error':{'message':m}}).encode() for m in
+                      ('Quota exceeded','Daily quota not exhausted','The output token limit is 2400'))
+        for body in bodies:
+            with self.subTest(body=body):
+                opener=Mock(side_effect=[self.quota_error(raw=body) for _ in range(3)]+[wire_response(completion())])
+                self.make_model(opener).complete('system',[],[])
+                self.assert_phases(opener,3,1)
+
+    def test_primary_success_never_fallback_and_next_call_starts_primary(self):
+        opener=Mock(side_effect=[self.quota_error(),wire_response(completion()),wire_response(completion())])
+        model=self.make_model(opener);model.complete('system',[],[]);model.complete('system',[],[])
+        keys=[c.args[0].get_header('Authorization') for c in opener.call_args_list]
+        self.assertEqual(keys,['Bearer '+SENTINEL,'Bearer '+self.secondary,'Bearer '+SENTINEL])
+
+    def test_non429_statuses_ignore_terminal_body(self):
+        for status in (400,401,403,404,402,408,500,502,503,504):
+            with self.subTest(status=status):
+                errors=[self.quota_error(status=status) for _ in range(3 if status in (408,500,502,503,504) else 1)]
+                for e in errors:e.fp.read=Mock(wraps=e.fp.read)
+                if status in (400,401,403,404):
+                    opener=Mock(side_effect=errors)
+                    with self.assertRaises(ProviderError):self.make_model(opener).complete('system',[],[])
+                    self.assert_phases(opener,1,0)
+                else:
+                    opener=Mock(side_effect=errors+[wire_response(completion())])
+                    self.make_model(opener).complete('system',[],[])
+                    self.assert_phases(opener,len(errors),1)
+                for e in errors:e.fp.read.assert_not_called()
+
+    def test_tool_and_application_failures_never_trigger_fallback(self):
+        opener=Mock(return_value=wire_response(completion('read','{broken')))
+        result=self.make_model(opener).complete('system',[],[TOOL])
+        self.assertIn('argument_error',result['content'][0]);self.assert_phases(opener,1,0)
+        for data in ({'error':{'message':self.daily}},{}):
+            opener=Mock(return_value=wire_response(data))
+            with self.assertRaises(ProviderError) as caught:self.make_model(opener).complete('system',[],[])
+            self.assertFalse(caught.exception.availability_failure);self.assert_phases(opener,1,0)
+
+    def test_financial_validation_and_tool_errors_do_not_switch_keys(self):
+        from financial_agent import run_agent_loop
+        from financial_tools import FinancialTools
+        from test_tools import FakeRepository,REQ
+        steps=[('retrieve_evidence',{}),('apply_evidence_amendments',{'amendments':[{}]}),
+               ('reconstruct_finances',{}),('evaluate_payment_plans',{}),('finish_decision',{})]
+        opener=Mock(side_effect=[wire_response(completion(n,json.dumps(a))) for n,a in steps])
+        model=self.make_model(opener);request=dict(REQ,requested_amount='700')
+        tools=FinancialTools(FakeRepository(),request,None)
+        result=run_agent_loop(model,tools,request,tools.fallback)
+        self.assertEqual(result['trace'][1]['result']['error']['code'],'invalid_tool_arguments')
+        self.assertEqual(result['row']['recommended_payment_method'],'not_recommended')
+        self.assertEqual(opener.call_count,5)
+        self.assertTrue(all(c.args[0].get_header('Authorization')=='Bearer '+SENTINEL for c in opener.call_args_list))
+
+    def test_primary_200_never_activates_fallback(self):
+        opener=Mock(return_value=wire_response(completion()))
+        self.make_model(opener).complete('system',[],[]);self.assert_phases(opener,1,0)
+
+    def test_oversized_error_body_does_not_establish_terminal_quota(self):
+        from model_provider import MAX_RATE_LIMIT_BODY_BYTES
+        body=json.dumps({'error':{'message':self.daily},'padding':'x'*(MAX_RATE_LIMIT_BODY_BYTES+1)}).encode()
+        errors=[self.quota_error(raw=body) for _ in range(3)]
+        for e in errors:e.fp.read=Mock(wraps=e.fp.read)
+        opener=Mock(side_effect=errors+[wire_response(completion())])
+        self.make_model(opener).complete('system',[],[]);self.assert_phases(opener,3,1)
+        for e in errors:e.fp.read.assert_called_once_with(MAX_RATE_LIMIT_BODY_BYTES+1)
+
+    def test_deeply_nested_error_json_is_unknown_and_preserves_retries(self):
+        from model_provider import classify_rate_limit
+        raw=b'['*2000+b'0'+b']'*2000
+        with patch('model_provider.json.loads',side_effect=RecursionError('nested error response')):
+            self.assertEqual(classify_rate_limit(raw),'UNKNOWN')
+        self.assertEqual(classify_rate_limit(raw),'UNKNOWN')
+        opener=Mock(side_effect=[self.quota_error(raw=raw) for _ in range(3)]+[wire_response(completion())])
+        self.make_model(opener).complete('system',[],[]);self.assert_phases(opener,3,1)
+
+    def test_classifier_explicit_terminal_patterns_case_insensitive(self):
+        from model_provider import classify_rate_limit
+        for message in (self.daily,'DAILY LIMIT REACHED','Daily quota exhausted',
+                        'API key quota exceeded','Insufficient quota','Limit reached for the API key',
+                        'Usage limit reached for this API key'):
+            with self.subTest(message=message):
+                self.assertEqual(classify_rate_limit(json.dumps({'error':{'message':message}}).encode()),'TERMINAL_KEY_QUOTA')
+
+    def test_classifier_does_not_guess_from_generic_or_unrelated_words(self):
+        from model_provider import classify_rate_limit
+        for message in ('Quota exceeded','Usage limit reached','Daily quota not exhausted',
+                        'The output token limit is 2400; quota remains available',
+                        'Daily limit reached? No, retry after a second',
+                        'Documentation mentions daily quota exhausted as an example'):
+            with self.subTest(message=message):
+                self.assertNotEqual(classify_rate_limit(json.dumps({'error':{'message':message}})),'TERMINAL_KEY_QUOTA')
+        self.assertEqual(classify_rate_limit(b'{"error":{"message":"Too many requests"}}'),'TRANSIENT_RATE_LIMIT')
+        self.assertEqual(classify_rate_limit(b'not JSON'),'UNKNOWN')
+
+    def test_body_read_failure_preserves_unknown_retry_contract(self):
+        errors=[self.quota_error() for _ in range(3)]
+        for e in errors:e.fp.read=Mock(side_effect=OSError(SENTINEL))
+        opener=Mock(side_effect=errors+[wire_response(completion())])
+        self.make_model(opener).complete('system',[],[]);self.assert_phases(opener,3,1)
+
+    def test_terminal_error_body_secrets_never_reach_diagnostics(self):
+        message=self.daily+' '+SENTINEL+' '+self.secondary
+        opener=Mock(side_effect=[self.quota_error(message),self.quota_error(message)])
+        try:self.make_model(opener).complete('system',[],[])
+        except ProviderError as error:
+            rendered=traceback.format_exc()+repr(error)+json.dumps(error.usage)
+            for key in (SENTINEL,self.secondary):self.assertNotIn(key,rendered)
+        else:self.fail('Terminal quota unexpectedly succeeded')
+        self.assert_phases(opener,1,1)
+
 if __name__=='__main__':unittest.main()

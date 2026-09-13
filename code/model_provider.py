@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 
 MAX_RESPONSE_TOKENS=2400
 MAX_HTTP_ATTEMPTS=3
+MAX_RATE_LIMIT_BODY_BYTES=16384
 AVAILABILITY_HTTP_STATUSES={402,408,429,500,502,503,504}
 
 def strict_object(pairs):
@@ -25,6 +26,37 @@ def strict_object(pairs):
 
 def reject_constant(value):
     raise ValueError('Nonstandard JSON numeric constant')
+
+def classify_rate_limit(body):
+    """Classify explicit error.message evidence; never return/persist raw bodies.
+
+    Generic quota wording is ambiguous (e.g. per-minute quotas). Only clearly
+    daily or key-scoped exhaustion stops a key; UNKNOWN retains normal retries.
+    """
+    if not isinstance(body,(str,bytes,bytearray)) or len(body)>MAX_RATE_LIMIT_BODY_BYTES:
+        return 'UNKNOWN'
+    try:
+        data=json.loads(body,object_pairs_hook=strict_object,parse_constant=reject_constant)
+    except (ValueError,TypeError,UnicodeError,RecursionError):return 'UNKNOWN'
+    error=data.get('error') if isinstance(data,dict) else None
+    message=error.get('message') if isinstance(error,dict) else None
+    if not isinstance(message,str):return 'UNKNOWN'
+    message=' '.join(message.casefold().split())
+    if '?' in message:return 'UNKNOWN'
+    daily=(r'^(?:rate limit exceeded:\s*free-models-per-day\b|'
+           r'(?:free[- ]models? )?daily (?:request |usage |key )?(?:limit|quota) '
+           r'(?:has been |is )?(?:reached|exceeded|exhausted)\b|'
+           r'you (?:have )?(?:reached|exceeded|exhausted) (?:your|the) daily (?:limit|quota)\b)')
+    if re.match(daily,message):return 'TERMINAL_KEY_QUOTA'
+    if re.search(r'\b(?:per[- ]minute|per[- ]second|requests per minute|temporarily|throttl\w*|retry after)\b',message):
+        return 'TRANSIENT_RATE_LIMIT'
+    key_quota=(r'^(?:(?:api[- ]key|key|account) (?:quota|usage limit) '
+               r'(?:has been |is )?(?:reached|exceeded|exhausted)|insufficient quota|'
+               r'(?:usage )?limit (?:reached|exceeded|exhausted) for (?:(?:the|this|your) )?api[- ]key)\b')
+    if re.match(key_quota,message):return 'TERMINAL_KEY_QUOTA'
+    if re.match(r'^(?:rate limit exceeded|too many requests)\b',message):
+        return 'TRANSIENT_RATE_LIMIT'
+    return 'UNKNOWN'
 
 class ProviderError(RuntimeError):
     def __init__(self,message,usage=None,availability_failure=False):
@@ -210,6 +242,13 @@ class OpenRouterModel:
                 return self._normalize(data,total_attempts)
             except ProviderError:raise
             except urllib.error.HTTPError as error:
+                if error.code==429:
+                    try:body=error.read(MAX_RATE_LIMIT_BODY_BYTES+1)
+                    except Exception:body=b''
+                    if classify_rate_limit(body)=='TERMINAL_KEY_QUOTA':
+                        raise ProviderError('OpenRouter request failed with HTTP 429',
+                                            dict(http_attempts=total_attempts,usage_missing_calls=1),
+                                            availability_failure=True) from None
                 if error.code not in {408,429,500,502,503,504} or attempt==MAX_HTTP_ATTEMPTS:
                     raise ProviderError('OpenRouter request failed with HTTP '+str(error.code),dict(http_attempts=total_attempts,usage_missing_calls=1),
                                         availability_failure=error.code in AVAILABILITY_HTTP_STATUSES) from None
